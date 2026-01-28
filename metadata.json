@@ -1,0 +1,9 @@
+{
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "name": "Nexus Studio",
+  "description": "Estudio avanzado de IA generativa multi-modal."
+}
