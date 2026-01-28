@@ -28,7 +28,11 @@ import {
   Upload,
   Share2,
   Copy,
-  Check
+  Check,
+  Instagram,
+  Linkedin,
+  Twitter,
+  MessageSquare
 } from 'lucide-react';
 
 // --- Utilities ---
@@ -81,7 +85,7 @@ const HistorySection = ({ history, onSelect, onRemove, onClear, title, icon: Ico
   return (
     <div className="mt-6 border-t border-slate-700/50 pt-4">
       <div className="flex items-center justify-between mb-3 px-1">
-        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 text-slate-400">
           <Icon size={14} /> {title}
         </h4>
         <button onClick={onClear} className="text-[10px] text-slate-500 hover:text-red-400 transition-colors flex items-center gap-1 font-bold">
@@ -121,7 +125,8 @@ const DreamCanvas = () => {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [refImage, setRefImage] = useState<{data: string, mime: string} | null>(null);
-  const [postText, setPostText] = useState<string | null>(null);
+  const [postVariations, setPostVariations] = useState<{instagram: string, linkedin: string, twitter: string} | null>(null);
+  const [activePostTab, setActivePostTab] = useState<'instagram' | 'linkedin' | 'twitter'>('instagram');
   const [writingPost, setWritingPost] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -176,7 +181,7 @@ const DreamCanvas = () => {
     setLoading(true);
     setError(null);
     setImages([]);
-    setPostText(null);
+    setPostVariations(null);
     
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -185,9 +190,8 @@ const DreamCanvas = () => {
       if (qualityLevel === 1) imageConfig.imageSize = "1K";
       if (qualityLevel === 2) imageConfig.imageSize = "2K";
 
-      // Intentar generar 5 variaciones (Llamadas en paralelo para velocidad)
       const tasks = Array.from({ length: 5 }).map(async (_, i) => {
-        const parts: any[] = [{ text: `${prompt} --v ${i + 1}` }];
+        const parts: any[] = [{ text: `${prompt} variation ${i + 1} --style high-detail` }];
         if (refImage) {
           parts.unshift({
             inlineData: {
@@ -227,25 +231,39 @@ const DreamCanvas = () => {
     }
   };
 
-  const createSocialPost = async () => {
+  const createSocialPosts = async () => {
     if (images.length === 0) return;
     setWritingPost(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      // Usar la primera imagen como referencia para el post
       const base64Data = images[0].split(',')[1];
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: {
           parts: [
             { inlineData: { data: base64Data, mimeType: 'image/png' } },
-            { text: `Escribe un post creativo para redes sociales (Instagram/LinkedIn) basado en esta imagen que generamos con el prompt: "${prompt}". Incluye una descripción cautivadora, emojis y hashtags relevantes.` }
+            { text: `Genera 3 variaciones de posts sociales para esta imagen (Prompt: "${prompt}") en formato JSON con los campos "instagram", "linkedin" y "twitter". 
+            - Instagram: Enfocado en estética, visuales y storytelling emocional.
+            - LinkedIn: Enfocado en profesionalismo, innovación y negocios.
+            - Twitter: Enfocado en viralidad, brevedad y punchline.` }
           ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              instagram: { type: Type.STRING },
+              linkedin: { type: Type.STRING },
+              twitter: { type: Type.STRING }
+            }
+          }
         }
       });
-      setPostText(response.text || "No se pudo redactar el post.");
+      const data = JSON.parse(response.text);
+      setPostVariations(data);
     } catch (e) {
-      setPostText("Error al redactar post.");
+      setError("Error al redactar variaciones de posts.");
     } finally {
       setWritingPost(false);
     }
@@ -261,8 +279,8 @@ const DreamCanvas = () => {
   };
 
   const copyToClipboard = () => {
-    if (postText) {
-      navigator.clipboard.writeText(postText);
+    if (postVariations) {
+      navigator.clipboard.writeText(postVariations[activePostTab]);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -379,12 +397,27 @@ const DreamCanvas = () => {
         {images.length > 0 && (
           <div className="glass p-6 rounded-3xl border-white/5 animate-in slide-in-from-bottom duration-500">
              <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <Share2 size={14} /> Nexus Scribe (Redacción AI)
+                <Share2 size={14} /> Nexus Scribe (Post Variations)
              </h3>
-             {postText ? (
+             {postVariations ? (
                <div className="space-y-4">
+                  <div className="flex bg-slate-900/50 p-1 rounded-xl gap-1">
+                    {[
+                      { id: 'instagram', icon: Instagram },
+                      { id: 'linkedin', icon: Linkedin },
+                      { id: 'twitter', icon: Twitter }
+                    ].map(tab => (
+                      <button 
+                        key={tab.id}
+                        onClick={() => setActivePostTab(tab.id as any)}
+                        className={`flex-1 py-2 rounded-lg flex items-center justify-center transition-all ${activePostTab === tab.id ? 'bg-white/10 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
+                      >
+                        <tab.icon size={16} />
+                      </button>
+                    ))}
+                  </div>
                   <div className="bg-slate-900/80 rounded-2xl p-4 text-xs text-slate-300 leading-relaxed max-h-60 overflow-y-auto border border-white/5 font-mono whitespace-pre-wrap">
-                    {postText}
+                    {postVariations[activePostTab]}
                   </div>
                   <button onClick={copyToClipboard} className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-xl text-[10px] font-black tracking-widest flex items-center justify-center gap-2 transition-all">
                     {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
@@ -393,11 +426,11 @@ const DreamCanvas = () => {
                </div>
              ) : (
                 <button 
-                  onClick={createSocialPost}
+                  onClick={createSocialPosts}
                   disabled={writingPost}
                   className="w-full bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 py-4 rounded-2xl text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-2"
                 >
-                  {writingPost ? <Loader2 className="animate-spin" size={14} /> : 'CREAR POST DE REDES'}
+                  {writingPost ? <Loader2 className="animate-spin" size={14} /> : 'REDACTAR VARIACIONES DE POSTS'}
                 </button>
              )}
           </div>
@@ -432,12 +465,14 @@ const DreamCanvas = () => {
                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-6">
                     <div className="flex items-center justify-between">
                        <span className="text-[10px] font-black text-white tracking-widest uppercase">VARIANTE #{i+1}</span>
-                       <button 
-                        onClick={() => downloadImage(img, i)}
-                        className="bg-white/10 hover:bg-white/20 backdrop-blur-md text-white p-3 rounded-2xl border border-white/20 transition-all active:scale-95"
-                       >
-                         <Download size={18} />
-                       </button>
+                       <div className="flex gap-2">
+                        <button 
+                          onClick={() => downloadImage(img, i)}
+                          className="bg-white/10 hover:bg-white/20 backdrop-blur-md text-white p-3 rounded-2xl border border-white/20 transition-all active:scale-95"
+                        >
+                          <Download size={18} />
+                        </button>
+                       </div>
                     </div>
                  </div>
                </div>
@@ -549,7 +584,7 @@ const MotionStudio = () => {
 
   return (
     <div className="grid md:grid-cols-[350px_1fr] gap-6">
-      <div className="glass p-6 rounded-3xl h-fit">
+      <div className="glass p-6 rounded-3xl h-fit border-white/5">
         <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
           <Video className="text-pink-400" size={20} /> Motion Studio
         </h2>
@@ -680,7 +715,7 @@ const LiveCompanion = () => {
 
   return (
     <div className="grid md:grid-cols-[400px_1fr] gap-6">
-      <div className="glass p-8 rounded-3xl flex flex-col items-center justify-center text-center">
+      <div className="glass p-8 rounded-3xl flex flex-col items-center justify-center text-center border-white/5 shadow-2xl">
         <h2 className="text-xl font-bold mb-8 flex items-center gap-2">
           <Mic className="text-emerald-400" size={20} /> Live Companion
         </h2>
@@ -693,7 +728,7 @@ const LiveCompanion = () => {
         <p className="mt-8 text-slate-400 text-xs font-bold tracking-[0.2em] uppercase">{active ? 'TRANSMITIENDO' : 'LISTO PARA ESCUCHAR'}</p>
         {error && <p className="mt-4 text-red-400 text-xs font-bold uppercase">{error}</p>}
       </div>
-      <div className="glass p-6 rounded-3xl h-[600px] flex flex-col">
+      <div className="glass p-6 rounded-3xl h-[600px] flex flex-col border-white/5 shadow-2xl">
         <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-4">
           <h3 className="text-slate-500 font-bold text-xs tracking-widest uppercase">TRANSCRIPCIÓN EN VIVO</h3>
           <button onClick={() => setMsgs([])} className="text-[10px] text-slate-600 hover:text-red-400 font-bold uppercase">Limpiar</button>
@@ -747,7 +782,7 @@ const Vox = () => {
   };
 
   return (
-    <div className="glass p-8 rounded-3xl max-w-4xl mx-auto">
+    <div className="glass p-8 rounded-3xl max-w-4xl mx-auto border-white/5 shadow-2xl">
       <h2 className="text-xl font-bold mb-8 flex items-center gap-2">
         <Volume2 className="text-amber-400" size={24} /> Vox Studio
       </h2>
@@ -759,7 +794,7 @@ const Vox = () => {
           onChange={(e) => setText(e.target.value)}
         />
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex bg-slate-800/50 p-1.5 rounded-2xl gap-1">
+          <div className="flex bg-slate-800/50 p-1.5 rounded-2xl gap-1 border border-white/5">
             {['Kore', 'Puck', 'Charon', 'Fenrir'].map(v => (
               <button key={v} onClick={() => setVoice(v)} className={`px-5 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${voice === v ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
                 {v}
@@ -791,7 +826,7 @@ const App = () => {
       <header className="flex flex-col md:flex-row items-center justify-between mb-16 gap-8">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30 border border-indigo-400/20">
               <Layers className="text-white" size={20} />
             </div>
             <h1 className="text-5xl font-black tracking-tighter gradient-text">NEXUS.</h1>
