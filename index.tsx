@@ -32,6 +32,9 @@ import {
   Instagram,
   Linkedin,
   Twitter,
+  Target,
+  ShoppingBag,
+  TrendingUp,
   MessageSquare
 } from 'lucide-react';
 
@@ -118,6 +121,7 @@ const HistorySection = ({ history, onSelect, onRemove, onClear, title, icon: Ico
 // --- Features ---
 const DreamCanvas = () => {
   const [prompt, setPrompt] = useState('');
+  const [campaignGoal, setCampaignGoal] = useState('');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [qualityLevel, setQualityLevel] = useState(0); 
   const [images, setImages] = useState<string[]>([]);
@@ -190,8 +194,11 @@ const DreamCanvas = () => {
       if (qualityLevel === 1) imageConfig.imageSize = "1K";
       if (qualityLevel === 2) imageConfig.imageSize = "2K";
 
+      // Enriquecer el prompt para marketing
+      const marketingEnhancedPrompt = `High-end professional commercial product photography. Marketing style, sleek lighting, clean composition, luxury advertisement look. Subject: ${prompt}. ${campaignGoal ? `Focus on: ${campaignGoal}` : ''}`;
+
       const tasks = Array.from({ length: 5 }).map(async (_, i) => {
-        const parts: any[] = [{ text: `${prompt} variation ${i + 1} --style high-detail` }];
+        const parts: any[] = [{ text: `${marketingEnhancedPrompt} --variation ${i + 1} --v 6` }];
         if (refImage) {
           parts.unshift({
             inlineData: {
@@ -242,10 +249,16 @@ const DreamCanvas = () => {
         contents: {
           parts: [
             { inlineData: { data: base64Data, mimeType: 'image/png' } },
-            { text: `Genera 3 variaciones de posts sociales para esta imagen (Prompt: "${prompt}") en formato JSON con los campos "instagram", "linkedin" y "twitter". 
-            - Instagram: Enfocado en estética, visuales y storytelling emocional.
-            - LinkedIn: Enfocado en profesionalismo, innovación y negocios.
-            - Twitter: Enfocado en viralidad, brevedad y punchline.` }
+            { text: `Actúa como un experto en Marketing de Ventas y Copywriting de alto impacto. 
+            Genera 3 variaciones de posts persuasivos para vender un producto/servicio basado en esta imagen.
+            Contexto del producto: "${prompt}".
+            Objetivo de la campaña: "${campaignGoal || 'Aumentar ventas y atraer clientes'}".
+            
+            Reglas de redacción:
+            - Usa la estructura AIDA (Atención, Interés, Deseo, Acción).
+            - Enfócate en beneficios, no solo en características.
+            - Incluye un "Call to Action" (CTA) irresistible.
+            - Devuelve un objeto JSON con las claves: "instagram", "linkedin", "twitter".` }
           ]
         },
         config: {
@@ -263,7 +276,7 @@ const DreamCanvas = () => {
       const data = JSON.parse(response.text);
       setPostVariations(data);
     } catch (e) {
-      setError("Error al redactar variaciones de posts.");
+      setError("Error al redactar variaciones de posts de marketing.");
     } finally {
       setWritingPost(false);
     }
@@ -272,7 +285,7 @@ const DreamCanvas = () => {
   const downloadImage = (url: string, index: number) => {
     const link = document.createElement('a');
     link.href = url;
-    link.download = `nexus-dream-${Date.now()}-${index + 1}.png`;
+    link.download = `nexus-marketing-${Date.now()}-${index + 1}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -290,21 +303,38 @@ const DreamCanvas = () => {
     <div className="grid lg:grid-cols-[380px_1fr] gap-8">
       <aside className="space-y-6">
         <div className="glass p-6 rounded-3xl h-fit border-white/5 shadow-2xl">
-          <h2 className="text-xl font-bold mb-6 flex items-center gap-2 text-white">
-            <Sparkles className="text-indigo-400" size={20} /> Dream Canvas
-          </h2>
+          <div className="flex items-center gap-2 mb-6">
+            <ShoppingBag className="text-indigo-400" size={20} />
+            <h2 className="text-xl font-bold text-white">Marketing Studio</h2>
+          </div>
           
           <div className="space-y-6">
             <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2">
+                <Target size={12} /> Objetivo de Venta / USP
+              </label>
+              <input
+                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-xs text-slate-200"
+                placeholder="Ej: Descuento 20%, Calidad Premium, Envío gratis..."
+                value={campaignGoal}
+                onChange={(e) => setCampaignGoal(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Producto o Concepto</label>
+              <textarea
+                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 min-h-[100px] text-sm resize-none text-slate-200"
+                placeholder="Ej: Un reloj de lujo minimalista sobre una mesa de mármol..."
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Referencia Visual</label>
               <div className="relative group">
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  onChange={handleFileUpload}
-                  className="hidden" 
-                  id="img-upload" 
-                />
+                <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" id="img-upload" />
                 <label 
                   htmlFor="img-upload"
                   className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-4 transition-all cursor-pointer ${refImage ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-slate-800 hover:border-slate-700 hover:bg-white/5'}`}
@@ -319,25 +349,15 @@ const DreamCanvas = () => {
                   ) : (
                     <>
                       <Upload className="text-slate-600 mb-2 group-hover:text-indigo-400 transition-colors" size={20} />
-                      <span className="text-[10px] text-slate-500 font-bold uppercase">Subir Imagen Base</span>
+                      <span className="text-[10px] text-slate-500 font-bold uppercase">Subir Foto de Producto</span>
                     </>
                   )}
                 </label>
               </div>
             </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Concepto Artístico</label>
-              <textarea
-                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 min-h-[100px] text-sm resize-none text-slate-200"
-                placeholder="Escribe tu visión aquí..."
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-              />
-            </div>
             
             <div className="space-y-3">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Formato</label>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Formato de Ads</label>
               <div className="grid grid-cols-4 gap-2">
                 {['1:1', '16:9', '9:16', '4:3'].map(ratio => (
                   <button
@@ -353,32 +373,29 @@ const DreamCanvas = () => {
 
             <div className="space-y-4">
               <div className="flex items-center justify-between px-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Motor de Calidad</label>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Resolución Comercial</label>
                 <div className={`flex items-center gap-1 text-[10px] font-black uppercase ${currentQuality.color}`}>
                   <currentQuality.icon size={12} />
                   {currentQuality.label}
                 </div>
               </div>
-              
-              <div className="px-2 pb-2">
-                <input 
-                  type="range" min="0" max="2" step="1"
-                  value={qualityLevel}
-                  onChange={(e) => setQualityLevel(parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                />
-              </div>
+              <input 
+                type="range" min="0" max="2" step="1"
+                value={qualityLevel}
+                onChange={(e) => setQualityLevel(parseInt(e.target.value))}
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+              />
             </div>
 
             <button
               onClick={generateImage}
               disabled={loading || !prompt.trim()}
-              className={`w-full py-4 rounded-2xl font-black text-xs tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg ${loading ? 'bg-slate-800 text-slate-600' : 'bg-gradient-to-br from-indigo-600 via-indigo-500 to-purple-600 hover:scale-[1.02] text-white shadow-indigo-900/20 active:scale-[0.98]'}`}
+              className={`w-full py-4 rounded-2xl font-black text-xs tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg ${loading ? 'bg-slate-800 text-slate-600' : 'bg-gradient-to-br from-indigo-600 via-indigo-500 to-emerald-600 hover:scale-[1.02] text-white shadow-indigo-900/20 active:scale-[0.98]'}`}
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : (
                 <>
-                  <Layers size={16} /> 
-                  GENERA PENTÁGONO (x5)
+                  <TrendingUp size={16} /> 
+                  LANZAR CAMPAÑA (x5)
                 </>
               )}
             </button>
@@ -388,7 +405,7 @@ const DreamCanvas = () => {
               onSelect={setPrompt} 
               onRemove={removeHistoryItem}
               onClear={() => { setHistory([]); localStorage.removeItem('nexus_dream_history'); }}
-              title="HISTORIAL NEXUS"
+              title="CAMPAÑAS PREVIAS"
               icon={Clock} 
             />
           </div>
@@ -397,40 +414,41 @@ const DreamCanvas = () => {
         {images.length > 0 && (
           <div className="glass p-6 rounded-3xl border-white/5 animate-in slide-in-from-bottom duration-500">
              <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <Share2 size={14} /> Nexus Scribe (Post Variations)
+                <MessageSquare size={14} /> Marketing Copy Hooks
              </h3>
              {postVariations ? (
                <div className="space-y-4">
                   <div className="flex bg-slate-900/50 p-1 rounded-xl gap-1">
                     {[
-                      { id: 'instagram', icon: Instagram },
-                      { id: 'linkedin', icon: Linkedin },
-                      { id: 'twitter', icon: Twitter }
+                      { id: 'instagram', icon: Instagram, label: 'IG' },
+                      { id: 'linkedin', icon: Linkedin, label: 'LI' },
+                      { id: 'twitter', icon: Twitter, label: 'X' }
                     ].map(tab => (
                       <button 
                         key={tab.id}
                         onClick={() => setActivePostTab(tab.id as any)}
-                        className={`flex-1 py-2 rounded-lg flex items-center justify-center transition-all ${activePostTab === tab.id ? 'bg-white/10 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
+                        className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-2 transition-all ${activePostTab === tab.id ? 'bg-white/10 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
                       >
-                        <tab.icon size={16} />
+                        <tab.icon size={14} />
+                        <span className="text-[9px] font-black">{tab.label}</span>
                       </button>
                     ))}
                   </div>
-                  <div className="bg-slate-900/80 rounded-2xl p-4 text-xs text-slate-300 leading-relaxed max-h-60 overflow-y-auto border border-white/5 font-mono whitespace-pre-wrap">
+                  <div className="bg-slate-900/80 rounded-2xl p-4 text-xs text-slate-300 leading-relaxed max-h-64 overflow-y-auto border border-white/5 font-sans whitespace-pre-wrap">
                     {postVariations[activePostTab]}
                   </div>
                   <button onClick={copyToClipboard} className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-xl text-[10px] font-black tracking-widest flex items-center justify-center gap-2 transition-all">
                     {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    {copied ? 'COPIADO' : 'COPIAR AL PORTAPAPELES'}
+                    {copied ? 'COPIADO' : 'COPIAR COPY'}
                   </button>
                </div>
              ) : (
                 <button 
                   onClick={createSocialPosts}
                   disabled={writingPost}
-                  className="w-full bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 py-4 rounded-2xl text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-2"
+                  className="w-full bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 py-4 rounded-2xl text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-2"
                 >
-                  {writingPost ? <Loader2 className="animate-spin" size={14} /> : 'REDACTAR VARIACIONES DE POSTS'}
+                  {writingPost ? <Loader2 className="animate-spin" size={14} /> : 'GENERAR ESTRATEGIA DE VENTA'}
                 </button>
              )}
           </div>
@@ -442,12 +460,12 @@ const DreamCanvas = () => {
           <div className="glass rounded-3xl min-h-[600px] flex flex-col items-center justify-center gap-8 relative overflow-hidden">
             <div className="absolute inset-0 bg-indigo-600/5 animate-pulse"></div>
             <div className="relative">
-              <div className="w-24 h-24 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
-              <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400" size={32} />
+              <div className="w-24 h-24 border-4 border-indigo-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
+              <ShoppingBag className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-400" size={32} />
             </div>
             <div className="text-center space-y-2">
-               <p className="text-indigo-100 font-black tracking-[0.4em] text-sm uppercase">Sintetizando Variaciones...</p>
-               <p className="text-slate-500 text-[10px] font-bold uppercase">Nexus está invocando 5 realidades diferentes</p>
+               <p className="text-emerald-100 font-black tracking-[0.4em] text-sm uppercase">Generando Catálogo Visual...</p>
+               <p className="text-slate-500 text-[10px] font-bold uppercase">Nexus está renderizando 5 variaciones de alto impacto</p>
             </div>
           </div>
         ) : error ? (
@@ -458,17 +476,20 @@ const DreamCanvas = () => {
              </div>
            </div>
         ) : images.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-700">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-700 pb-12">
              {images.map((img, i) => (
                <div key={i} className={`group relative rounded-3xl overflow-hidden border border-white/5 bg-slate-900 shadow-xl ${i === 0 ? 'md:col-span-2 md:row-span-2' : ''}`}>
-                 <img src={img} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" alt={`Gen ${i+1}`} />
+                 <img src={img} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" alt={`Ad ${i+1}`} />
                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-6">
                     <div className="flex items-center justify-between">
-                       <span className="text-[10px] font-black text-white tracking-widest uppercase">VARIANTE #{i+1}</span>
+                       <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-white tracking-widest uppercase">MKT ASSET #{i+1}</span>
+                        <span className="text-[9px] text-emerald-400 font-bold uppercase">Ready for Ads</span>
+                       </div>
                        <div className="flex gap-2">
                         <button 
                           onClick={() => downloadImage(img, i)}
-                          className="bg-white/10 hover:bg-white/20 backdrop-blur-md text-white p-3 rounded-2xl border border-white/20 transition-all active:scale-95"
+                          className="bg-emerald-600 hover:bg-emerald-500 backdrop-blur-md text-white p-3 rounded-2xl transition-all active:scale-95 shadow-lg shadow-emerald-900/40"
                         >
                           <Download size={18} />
                         </button>
@@ -482,9 +503,9 @@ const DreamCanvas = () => {
           <div className="glass rounded-3xl min-h-[600px] flex items-center justify-center group">
             <div className="text-slate-700 text-center">
               <div className="w-24 h-24 mx-auto mb-6 bg-slate-900/50 rounded-full flex items-center justify-center border border-slate-800 opacity-20 group-hover:opacity-40 transition-all duration-700 group-hover:rotate-12">
-                 <Layers size={40} />
+                 <ShoppingBag size={40} />
               </div>
-              <p className="font-bold tracking-[0.5em] text-[10px] uppercase opacity-20">El Lienzo está Vacío</p>
+              <p className="font-bold tracking-[0.5em] text-[10px] uppercase opacity-20">Esperando Brief de Producto</p>
             </div>
           </div>
         )}
@@ -716,7 +737,7 @@ const LiveCompanion = () => {
   return (
     <div className="grid md:grid-cols-[400px_1fr] gap-6">
       <div className="glass p-8 rounded-3xl flex flex-col items-center justify-center text-center border-white/5 shadow-2xl">
-        <h2 className="text-xl font-bold mb-8 flex items-center gap-2">
+        <h2 className="text-xl font-bold mb-8 flex items-center gap-2 text-white">
           <Mic className="text-emerald-400" size={20} /> Live Companion
         </h2>
         <div className={`relative w-48 h-48 rounded-full flex items-center justify-center transition-all duration-500 ${active ? 'bg-emerald-500/20 neon-glow scale-110' : 'bg-slate-800'}`}>
@@ -741,7 +762,7 @@ const LiveCompanion = () => {
               </div>
             </div>
           ))}
-          {msgs.length === 0 && <div className="h-full flex flex-col items-center justify-center opacity-20"><Mic size={48} className="mb-4"/><p className="text-xs font-bold tracking-widest">NO HAY DATOS DE VOZ</p></div>}
+          {msgs.length === 0 && <div className="h-full flex flex-col items-center justify-center opacity-20"><Mic size={48} className="mb-4"/><p className="text-xs font-bold tracking-widest text-slate-700">NO HAY DATOS DE VOZ</p></div>}
         </div>
       </div>
     </div>
@@ -783,7 +804,7 @@ const Vox = () => {
 
   return (
     <div className="glass p-8 rounded-3xl max-w-4xl mx-auto border-white/5 shadow-2xl">
-      <h2 className="text-xl font-bold mb-8 flex items-center gap-2">
+      <h2 className="text-xl font-bold mb-8 flex items-center gap-2 text-white">
         <Volume2 className="text-amber-400" size={24} /> Vox Studio
       </h2>
       <div className="space-y-6">
@@ -815,14 +836,14 @@ const App = () => {
   const [tab, setTab] = useState('images');
 
   const tabs = [
-    { id: 'images', label: 'DREAMS', icon: Sparkles, color: 'text-indigo-400' },
+    { id: 'images', label: 'MARKETING', icon: ShoppingBag, color: 'text-emerald-400' },
     { id: 'video', label: 'MOTION', icon: Video, color: 'text-pink-400' },
-    { id: 'live', label: 'LIVE', icon: Mic, color: 'text-emerald-400' },
+    { id: 'live', label: 'LIVE', icon: Mic, color: 'text-indigo-400' },
     { id: 'tts', label: 'VOX', icon: Volume2, color: 'text-amber-400' },
   ];
 
   return (
-    <div className="min-h-screen p-4 md:p-12 max-w-7xl mx-auto">
+    <div className="min-h-screen p-4 md:p-12 max-w-7xl mx-auto relative z-10">
       <header className="flex flex-col md:flex-row items-center justify-between mb-16 gap-8">
         <div>
           <div className="flex items-center gap-3 mb-2">
@@ -831,7 +852,7 @@ const App = () => {
             </div>
             <h1 className="text-5xl font-black tracking-tighter gradient-text">NEXUS.</h1>
           </div>
-          <p className="text-slate-500 font-bold text-[10px] tracking-[0.4em] uppercase ml-1">Multi-Modal Generative AI</p>
+          <p className="text-slate-500 font-bold text-[10px] tracking-[0.4em] uppercase ml-1">Multi-Modal Generative AI for Sales</p>
         </div>
         
         <nav className="glass p-1.5 rounded-2xl flex gap-1 shadow-2xl border-white/5">
@@ -856,7 +877,7 @@ const App = () => {
       </main>
 
       <footer className="mt-24 text-center border-t border-slate-900 pt-12 pb-16">
-        <p className="text-slate-700 font-bold text-[10px] tracking-[0.3em] uppercase">Built with Gemini 2.5 Multi-Modal & Native Audio Preview</p>
+        <p className="text-slate-700 font-bold text-[10px] tracking-[0.3em] uppercase">Powered by Gemini 3 Flash & Pro Image Generation</p>
       </footer>
     </div>
   );
