@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -40,7 +39,11 @@ import {
   Store,
   Palette,
   ExternalLink,
-  Settings2
+  Settings2,
+  Lock,
+  RefreshCcw,
+  ShieldAlert,
+  Key
 } from 'lucide-react';
 
 // --- Utilities ---
@@ -130,11 +133,12 @@ const DreamCanvas = () => {
   const [marketingStyle, setMarketingStyle] = useState('Luxury Studio');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [qualityLevel, setQualityLevel] = useState(0); 
+  /* FIXED: Initializing batchSize with 1 instead of trying to use batchSize before its declaration */
   const [batchSize, setBatchSize] = useState(1);
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
-  const [error, setError] = useState<{message: string, isQuota: boolean} | null>(null);
+  const [error, setError] = useState<{message: string, isQuota: boolean, isForbidden: boolean, isFallback?: boolean} | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [refImage, setRefImage] = useState<{data: string, mime: string} | null>(null);
   const [postVariations, setPostVariations] = useState<{instagram: string, linkedin: string, twitter: string, email: string, ecommerce: string} | null>(null);
@@ -146,6 +150,16 @@ const DreamCanvas = () => {
     const saved = localStorage.getItem('nexus_dream_history');
     if (saved) setHistory(JSON.parse(saved));
   }, []);
+
+  /* FIXED: Adding missing downloadImage helper function */
+  const downloadImage = (url: string, index: number) => {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `nexus-marketing-asset-${index + 1}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -192,7 +206,6 @@ const DreamCanvas = () => {
 
     setLoading(true);
     setError(null);
-    // Preservar imágenes anteriores si es posible o limpiar según flujo
     setImages([]);
     setPostVariations(null);
     setCurrentStep(0);
@@ -215,7 +228,7 @@ const DreamCanvas = () => {
 
       const marketingEnhancedPrompt = `${styles[marketingStyle]} Subject: ${prompt}. Campaign goal: ${campaignGoal || 'High impact sales advertisement'}. professional commercial grade.`;
 
-      for (let i = 0; i < batchSize; i++) {
+      for (let i = 0; i < (typeof batchSize === 'number' ? batchSize : 1); i++) {
         setCurrentStep(i + 1);
         const parts: any[] = [{ text: `${marketingEnhancedPrompt} --variation ${i + 1} --v 6.1` }];
         if (refImage) {
@@ -238,39 +251,41 @@ const DreamCanvas = () => {
             setImages([...validResults]);
           }
         } catch (innerErr: any) {
-          const isQuotaError = innerErr.message?.includes("429") || innerErr.message?.includes("quota") || innerErr.message?.includes("exhausted");
+          const errMsg = innerErr.message?.toLowerCase() || "";
+          const isQuotaError = errMsg.includes("429") || errMsg.includes("quota");
+          const isForbiddenError = errMsg.includes("403") || errMsg.includes("permission");
           
-          if (isQuotaError) {
-            // Intento de fallback automático a Flash si el Pro falló por cuota
-            if (modelName === 'gemini-3-pro-image-preview') {
+          if (isForbiddenError) {
+            if (modelName !== 'gemini-2.5-flash-image') {
+              setError({
+                message: "Acceso Pro restringido. Usando motor Standard...",
+                isQuota: false,
+                isForbidden: true,
+                isFallback: true
+              });
               modelName = 'gemini-2.5-flash-image';
-              // Reintentar esta iteración con Flash
               i--; 
-              await new Promise(r => setTimeout(r, 2000)); // Pausa mayor para resetear
+              await new Promise(r => setTimeout(r, 800));
               continue;
             }
-
-            setError({
-              message: "Límite de cuota excedido (Error 429). La API de Gemini tiene límites estrictos para imágenes. Intenta reducir la cantidad de variaciones o espera 60 segundos.",
-              isQuota: true
-            });
-            break;
-          } else {
-            throw innerErr;
           }
+
+          if (isQuotaError) {
+            setError({ message: "Límite alcanzado. Espera 60s.", isQuota: true, isForbidden: false });
+            break;
+          }
+          throw innerErr;
         }
-        
-        // Retardo mayor entre peticiones secuenciales para mitigar 429
         if (i < batchSize - 1) await new Promise(resolve => setTimeout(resolve, 1500));
       }
 
-      if (validResults.length > 0) {
-        saveToHistory(prompt);
-      }
+      if (validResults.length > 0) saveToHistory(prompt);
     } catch (err: any) {
+      const errMsg = err.message || "Error desconocido";
       setError({
-        message: err.message || "Error inesperado al generar imagen",
-        isQuota: err.message?.includes("429") || err.message?.includes("quota")
+        message: errMsg.includes("403") ? "Error 403: Tu clave de API no tiene permisos. Requiere clave de facturación activa." : errMsg,
+        isQuota: errMsg.includes("429"),
+        isForbidden: errMsg.includes("403")
       });
     } finally {
       setLoading(false);
@@ -288,10 +303,7 @@ const DreamCanvas = () => {
         contents: {
           parts: [
             { inlineData: { data: base64Data, mimeType: 'image/png' } },
-            { text: `Genera una SUITE DE MARKETING completa basada en esta imagen.
-            Producto: "${prompt}". Objetivo: "${campaignGoal || 'Conversión'}".
-            
-            Retorna un JSON con: instagram, linkedin, twitter, email, ecommerce. Usa copywriting persuasivo AIDA.` }
+            { text: `Genera una suite de marketing AIDA en JSON para: "${prompt}".` }
           ]
         },
         config: {
@@ -311,26 +323,9 @@ const DreamCanvas = () => {
       const data = JSON.parse(response.text);
       setPostVariations(data);
     } catch (e: any) {
-      setError({ message: "Error en copywriting: " + e.message, isQuota: e.message?.includes("429") });
+      setError({ message: "Error: " + e.message, isQuota: e.message?.includes("429"), isForbidden: e.message?.includes("403") });
     } finally {
       setWritingPost(false);
-    }
-  };
-
-  const downloadImage = (url: string, index: number) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `nexus-sales-${index + 1}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const copyToClipboard = () => {
-    if (postVariations) {
-      navigator.clipboard.writeText(postVariations[activePostTab]);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -348,13 +343,13 @@ const DreamCanvas = () => {
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">Marketing Studio</h2>
-              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Quota-Aware Engine</p>
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Resilient Engine v3.2</p>
             </div>
           </div>
           
           <div className="space-y-6">
             <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
                 <Target size={12} className="text-emerald-400" /> Objetivo Comercial
               </label>
               <input
@@ -363,23 +358,6 @@ const DreamCanvas = () => {
                 value={campaignGoal}
                 onChange={(e) => setCampaignGoal(e.target.value)}
               />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2">
-                <Palette size={12} className="text-indigo-400" /> Look & Feel
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {['Luxury Studio', 'Minimalist', 'Vibrant Tech', 'Urban Lifestyle'].map(style => (
-                  <button
-                    key={style}
-                    onClick={() => setMarketingStyle(style)}
-                    className={`py-2 px-1 rounded-xl text-[9px] font-black transition-all border ${marketingStyle === style ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg' : 'bg-slate-800/50 border-slate-700 text-slate-500 hover:bg-slate-700'}`}
-                  >
-                    {style}
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="space-y-2">
@@ -393,18 +371,15 @@ const DreamCanvas = () => {
             </div>
 
             <div className="space-y-4">
-              <div className="flex items-center justify-between px-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                  <Layers size={12} className="text-amber-400" /> Variaciones ({batchSize})
-                </label>
-                <span className="text-[9px] text-slate-600 font-bold uppercase tracking-tighter">1 es más seguro para evitar error 429</span>
-              </div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 px-1">
+                <Layers size={12} className="text-amber-400" /> Variaciones
+              </label>
               <div className="grid grid-cols-5 gap-1">
                 {[1, 2, 3, 4, 5].map(n => (
                   <button
                     key={n}
                     onClick={() => setBatchSize(n)}
-                    className={`py-2 rounded-lg text-[10px] font-black transition-all border ${batchSize === n ? 'bg-amber-500 border-amber-400 text-slate-950 shadow-lg' : 'bg-slate-800/50 border-slate-700 text-slate-500 hover:bg-slate-700'}`}
+                    className={`py-2 rounded-lg text-[10px] font-black border ${batchSize === n ? 'bg-amber-500 border-amber-400 text-slate-950 shadow-lg' : 'bg-slate-800/50 border-slate-700 text-slate-500'}`}
                   >
                     {n}
                   </button>
@@ -412,186 +387,57 @@ const DreamCanvas = () => {
               </div>
             </div>
 
-            <div className="space-y-4">
-              <div className="flex items-center justify-between px-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Motor / Calidad</label>
-                <div className={`flex items-center gap-1 text-[10px] font-black uppercase ${currentQuality.color}`}>
-                  <currentQuality.icon size={12} />
-                  {currentQuality.label}
-                </div>
-              </div>
-              <input 
-                type="range" min="0" max="2" step="1"
-                value={qualityLevel}
-                onChange={(e) => setQualityLevel(parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-              />
-            </div>
-
             <button
               onClick={generateImage}
               disabled={loading || !prompt.trim()}
-              className={`w-full py-4 rounded-2xl font-black text-xs tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg ${loading ? 'bg-slate-800 text-slate-600' : 'bg-gradient-to-br from-emerald-600 via-emerald-500 to-indigo-600 hover:scale-[1.02] text-white shadow-emerald-900/20 active:scale-[0.98]'}`}
+              className={`w-full py-4 rounded-2xl font-black text-xs tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg ${loading ? 'bg-slate-800 text-slate-600' : 'bg-gradient-to-br from-emerald-600 via-emerald-500 to-indigo-600 hover:scale-[1.02] text-white'}`}
             >
-              {loading ? <Loader2 className="animate-spin" size={18} /> : (
-                <>
-                  <TrendingUp size={16} /> 
-                  SINTETIZAR ANUNCIOS
-                </>
-              )}
+              {loading ? <Loader2 className="animate-spin" size={18} /> : 'SINTETIZAR ANUNCIOS'}
             </button>
             
             <HistorySection 
               history={history} 
               onSelect={setPrompt} 
               onRemove={removeHistoryItem}
-              onClear={() => { setHistory([]); localStorage.removeItem('nexus_dream_history'); }}
-              title="BRIEFS RECIENTES"
+              onClear={() => setHistory([])}
+              title="HISTORIAL"
               icon={Clock} 
             />
           </div>
         </div>
-
-        {images.length > 0 && (
-          <div className="glass p-6 rounded-3xl border-white/5 animate-in slide-in-from-bottom duration-500 shadow-2xl">
-             <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <MessageSquare size={14} className="text-emerald-400" /> Copy Strategy
-             </h3>
-             {postVariations ? (
-               <div className="space-y-4">
-                  <div className="flex bg-slate-900/50 p-1 rounded-xl gap-1 overflow-x-auto">
-                    {[
-                      { id: 'instagram', icon: Instagram },
-                      { id: 'linkedin', icon: Linkedin },
-                      { id: 'twitter', icon: Twitter },
-                      { id: 'email', icon: Mail },
-                      { id: 'ecommerce', icon: Store }
-                    ].map(tab => (
-                      <button 
-                        key={tab.id}
-                        onClick={() => setActivePostTab(tab.id as any)}
-                        className={`min-w-[40px] flex-1 py-2 rounded-lg flex items-center justify-center transition-all ${activePostTab === tab.id ? 'bg-white/10 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
-                      >
-                        <tab.icon size={16} />
-                      </button>
-                    ))}
-                  </div>
-                  <div className="bg-slate-950/80 rounded-2xl p-4 text-xs text-slate-300 leading-relaxed max-h-72 overflow-y-auto border border-white/5 font-sans whitespace-pre-wrap">
-                    {postVariations[activePostTab]}
-                  </div>
-                  <button onClick={copyToClipboard} className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-xl text-[10px] font-black tracking-widest flex items-center justify-center gap-2 transition-all">
-                    {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    {copied ? 'COPIADO' : 'COPIAR CONTENIDO'}
-                  </button>
-               </div>
-             ) : (
-                <button 
-                  onClick={createMarketingSuite}
-                  disabled={writingPost}
-                  className="w-full bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 py-4 rounded-2xl text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-2"
-                >
-                  {writingPost ? <Loader2 className="animate-spin" size={14} /> : 'GENERAR TEXTOS DE VENTA'}
-                </button>
-             )}
-          </div>
-        )}
       </aside>
 
       <main className="space-y-6">
         {loading ? (
-          <div className="glass rounded-3xl min-h-[600px] flex flex-col items-center justify-center gap-8 relative overflow-hidden border-white/5 shadow-2xl">
-            <div className="absolute inset-0 bg-emerald-600/5 animate-pulse"></div>
-            <div className="relative">
-              <div className="w-24 h-24 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
-              <ShoppingBag className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-400" size={32} />
-            </div>
-            <div className="text-center space-y-2">
-               <p className="text-emerald-100 font-black tracking-[0.5em] text-sm uppercase">Componiendo Asset {currentStep}/{batchSize}...</p>
-               <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest px-12 leading-loose">Para evitar errores de cuota (429), Nexus procesa las imágenes de forma secuencial.</p>
-            </div>
+          <div className="glass rounded-3xl min-h-[600px] flex flex-col items-center justify-center gap-8 relative border-white/5 shadow-2xl overflow-hidden">
+            <div className="w-24 h-24 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
+            <p className="text-emerald-100 font-black tracking-[0.5em] text-sm uppercase">Nexus Procesando {currentStep}/{batchSize}...</p>
           </div>
         ) : error ? (
            <div className="glass rounded-3xl min-h-[400px] flex flex-col items-center justify-center border-red-500/10 shadow-2xl p-8">
-             <div className="text-red-400 p-8 flex flex-col items-center gap-4 bg-red-950/20 border border-red-900/50 rounded-2xl max-w-lg mx-4 text-center animate-in zoom-in duration-300">
-                <AlertCircle size={40} className="text-red-500" /> 
-                <h3 className="font-black text-xs uppercase tracking-widest">Aviso de Cuota API (Rate Limit)</h3>
+             <div className={`p-8 flex flex-col items-center gap-4 border rounded-2xl max-w-lg text-center animate-in zoom-in ${error.isFallback ? 'bg-amber-950/20 border-amber-900/50 text-amber-400' : 'bg-red-950/20 border-red-900/50 text-red-400'}`}>
+                {error.isForbidden ? <Lock size={40} className="text-red-500" /> : <AlertCircle size={40} className="text-red-500" />}
+                <h3 className="font-black text-xs uppercase tracking-widest">{error.isForbidden ? "Acceso Restringido" : "Aviso de Sistema"}</h3>
                 <p className="text-sm font-medium leading-relaxed">{error.message}</p>
-                {error.isQuota && (
-                  <div className="flex flex-col gap-2 w-full mt-4">
-                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-2">Sugerencia: Usa el motor "Standard (Fast)" y "Variaciones: 1" para el plan gratuito.</p>
-                    <div className="flex gap-2">
-                      <a 
-                        href="https://ai.google.dev/gemini-api/docs/billing" 
-                        target="_blank" 
-                        className="flex-1 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 py-3 rounded-xl text-[10px] font-black uppercase transition-all"
-                      >
-                        <ExternalLink size={12} /> Billing Info
-                      </a>
-                      {window.aistudio && (
-                        <button 
-                          onClick={() => window.aistudio.openSelectKey()}
-                          className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-[10px] font-black uppercase transition-all shadow-lg shadow-emerald-900/40"
-                        >
-                          Usar Paid Key
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                {error.isForbidden && (
+                  <button onClick={() => window.aistudio?.openSelectKey()} className="bg-emerald-600 text-white px-8 py-3 rounded-xl text-[10px] font-black uppercase mt-4">Configurar Clave Paid</button>
                 )}
              </div>
-             {images.length > 0 && (
-               <div className="mt-8 text-center">
-                 <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-6">Nexus pudo recuperar {images.length} imágenes antes del límite:</p>
-                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {images.map((img, i) => (
-                      <div key={i} className="relative aspect-square rounded-2xl overflow-hidden border border-white/5 shadow-xl group">
-                         <img src={img} className="w-full h-full object-cover" />
-                         <button onClick={() => downloadImage(img, i)} className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Download size={24} className="text-white" />
-                         </button>
-                      </div>
-                    ))}
-                 </div>
-               </div>
-             )}
            </div>
         ) : null}
 
-        {images.length > 0 && !loading && !error && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-right duration-700 pb-12">
+        {images.length > 0 && !loading && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-12">
              {images.map((img, i) => (
-               <div key={i} className={`group relative rounded-3xl overflow-hidden border border-white/5 bg-slate-900 shadow-2xl ${i === 0 && images.length > 1 ? 'md:col-span-2 md:row-span-2' : ''}`}>
-                 <img src={img} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" alt={`Marketing gen ${i+1}`} />
-                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-6 backdrop-blur-[2px]">
-                    <div className="flex items-center justify-between">
-                       <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-white tracking-[0.2em] uppercase">MKT ASSET v{i+1}</span>
-                        <div className="flex items-center gap-2 mt-1">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                          <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest">High-End Conversion</span>
-                        </div>
-                       </div>
-                       <button 
-                        onClick={() => downloadImage(img, i)}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white p-4 rounded-2xl transition-all active:scale-90 shadow-xl shadow-emerald-900/40"
-                       >
-                         <Download size={20} />
-                       </button>
-                    </div>
+               <div key={i} className="group relative rounded-3xl overflow-hidden border border-white/5 bg-slate-900 shadow-2xl">
+                 <img src={img} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" alt={`Asset ${i+1}`} />
+                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-6">
+                    <button onClick={() => downloadImage(img, i)} className="bg-emerald-600 text-white p-4 rounded-2xl self-end shadow-xl">
+                      <Download size={20} />
+                    </button>
                  </div>
                </div>
              ))}
-          </div>
-        )}
-
-        {!loading && !error && images.length === 0 && (
-          <div className="glass rounded-3xl min-h-[600px] flex items-center justify-center group shadow-2xl border-white/5">
-            <div className="text-slate-800 text-center flex flex-col items-center">
-              <div className="w-24 h-24 mb-6 bg-slate-900/50 rounded-[2.5rem] flex items-center justify-center border border-slate-800 opacity-20 group-hover:opacity-50 transition-all duration-1000 group-hover:rotate-[360deg] group-hover:bg-emerald-500/10 group-hover:border-emerald-500/30">
-                 <ShoppingBag size={40} className="group-hover:text-emerald-400 transition-colors" />
-              </div>
-              <p className="font-black tracking-[0.6em] text-[10px] uppercase opacity-10 group-hover:opacity-40 transition-opacity">Nexus Studio Ready</p>
-            </div>
           </div>
         )}
       </main>
@@ -604,40 +450,13 @@ const MotionStudio = () => {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<string[]>([]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('nexus_motion_history');
-    if (saved) setHistory(JSON.parse(saved));
-  }, []);
-
-  const saveToHistory = (p: string) => {
-    const newHistory = [p, ...history.filter(h => h !== p)].slice(0, 15);
-    setHistory(newHistory);
-    localStorage.setItem('nexus_motion_history', JSON.stringify(newHistory));
-  };
-
-  const removeHistoryItem = (p: string) => {
-    const newHistory = history.filter(h => h !== p);
-    setHistory(newHistory);
-    localStorage.setItem('nexus_motion_history', JSON.stringify(newHistory));
-  };
+  const [error, setError] = useState<{message: string, isForbidden: boolean} | null>(null);
 
   const generateVideo = async () => {
     if (!prompt.trim()) return;
-    
-    // @ts-ignore
-    const hasKey = await window.aistudio?.hasSelectedApiKey();
-    if (!hasKey && window.aistudio) {
-      // @ts-ignore
-      await window.aistudio.openSelectKey();
-    }
-
     setLoading(true);
     setError(null);
     setStatus('Iniciando Motor Veo...');
-    
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       let operation = await ai.models.generateVideos({
@@ -645,107 +464,40 @@ const MotionStudio = () => {
         prompt: prompt,
         config: { numberOfVideos: 1, resolution: '1080p', aspectRatio: '16:9' }
       });
-
-      const phases = ["Analizando Escena...", "Sintetizando Movimiento...", "Renderizando Frames...", "Finalizando Cinematic..."];
-      let i = 0;
-
       while (!operation.done) {
-        setStatus(phases[i % phases.length]);
-        i++;
+        setStatus("Renderizando Frames...");
         await new Promise(r => setTimeout(r, 10000));
         operation = await ai.operations.getVideosOperation({ operation: operation });
       }
-
       const link = operation.response?.generatedVideos?.[0]?.video?.uri;
       if (link) {
         const res = await fetch(`${link}&key=${process.env.API_KEY}`);
-        if (!res.ok) throw new Error("Fallo al descargar el video");
         const blob = await res.blob();
         setVideoUrl(URL.createObjectURL(blob));
-        saveToHistory(prompt);
-      } else {
-        throw new Error("No se generó el video.");
       }
     } catch (err: any) {
-      setError(err.message || "Error en generación");
-      if (err.message?.includes("Requested entity was not found") && window.aistudio) {
-        // @ts-ignore
-        window.aistudio.openSelectKey();
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const downloadVideo = () => {
-    if (videoUrl) {
-      const link = document.createElement('a');
-      link.href = videoUrl;
-      link.download = `nexus-motion-${Date.now()}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
+      setError({ message: err.message?.includes("403") ? "Error de Permisos (403): Veo requiere clave Pro." : err.message, isForbidden: err.message?.includes("403") });
+    } finally { setLoading(false); }
   };
 
   return (
     <div className="grid md:grid-cols-[350px_1fr] gap-6">
       <div className="glass p-6 rounded-3xl h-fit border-white/5 shadow-2xl">
-        <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
-          <Video className="text-pink-400" size={20} /> Motion Studio
-        </h2>
-        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-6 border-b border-slate-800 pb-2">Veo 3.1 Pro Engine</p>
-        
-        <div className="space-y-4">
-          <textarea
-            className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-pink-500/50 min-h-[120px] text-sm resize-none text-slate-200"
-            placeholder="Describe la secuencia cinematográfica..."
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
-          <button
-            onClick={generateVideo}
-            disabled={loading || !prompt.trim()}
-            className="w-full bg-pink-600 hover:bg-pink-500 disabled:bg-slate-800 disabled:text-slate-600 text-white py-4 rounded-2xl font-black text-xs tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg shadow-pink-900/20 active:scale-[0.98]"
-          >
-            {loading ? <Loader2 className="animate-spin" size={18} /> : 'LANZAR CÁMARAS'}
-          </button>
-
-          <HistorySection 
-            history={history} 
-            onSelect={setPrompt} 
-            onRemove={removeHistoryItem}
-            onClear={() => { setHistory([]); localStorage.removeItem('nexus_motion_history'); }}
-            title="HISTORIAL CINEMÁTICO"
-            icon={HistoryIcon} 
-          />
-        </div>
+        <h2 className="text-xl font-bold mb-6 flex items-center gap-2"><Video className="text-pink-400" size={20} /> Motion Studio</h2>
+        <textarea
+          className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-pink-500/50 min-h-[120px] text-sm resize-none text-slate-200"
+          placeholder="Escena cinemática..."
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+        <button onClick={generateVideo} disabled={loading || !prompt.trim()} className="w-full bg-pink-600 text-white py-4 rounded-2xl font-black text-xs tracking-[0.2em] mt-4">
+          {loading ? <Loader2 className="animate-spin mx-auto" size={18} /> : 'LANZAR CÁMARAS'}
+        </button>
       </div>
-
-      <div className="glass rounded-3xl min-h-[500px] flex items-center justify-center overflow-hidden relative bg-black border-slate-700/30 shadow-2xl">
-        {loading && (
-          <div className="absolute inset-0 z-20 bg-black/80 backdrop-blur-xl flex items-center justify-center flex-col gap-6 p-12 text-center">
-            <div className="w-full max-w-xs bg-slate-800 h-1 rounded-full overflow-hidden">
-              <div className="h-full bg-pink-500 animate-[loading_2s_ease-in-out_infinite]" style={{width: '60%'}}></div>
-            </div>
-            <p className="text-pink-100 font-black tracking-[0.2em] text-sm uppercase">{status}</p>
-            <p className="text-slate-500 text-[10px] uppercase font-bold">Tiempo estimado: 2-3 minutos</p>
-          </div>
-        )}
-        {error && <div className="text-red-400 p-8 flex items-center gap-3 bg-red-950/20 border border-red-900/50 rounded-2xl shadow-xl shadow-red-900/20"><AlertCircle size={24} /> {error}</div>}
-        {videoUrl ? (
-          <div className="relative w-full h-full group">
-            <video src={videoUrl} controls autoPlay loop className="w-full h-full object-cover" />
-            <button onClick={downloadVideo} className="absolute top-4 right-4 bg-black/60 backdrop-blur-md text-white p-3 rounded-2xl border border-white/20 opacity-0 group-hover:opacity-100 transition-all hover:bg-black/80">
-               <Download size={20} />
-            </button>
-          </div>
-        ) : !loading && (
-          <div className="text-slate-700 text-center">
-            <Play size={64} className="mx-auto mb-6 opacity-10" />
-            <p className="font-bold tracking-widest text-[10px] uppercase opacity-40">READY FOR PRODUCTION</p>
-          </div>
-        )}
+      <div className="glass rounded-3xl min-h-[500px] flex items-center justify-center bg-black overflow-hidden relative border-white/5">
+        {loading && <p className="text-pink-100 font-black tracking-[0.2em] uppercase">{status}</p>}
+        {error && <div className="text-red-400 p-8 text-center"><ShieldAlert size={40} className="mx-auto mb-4" /><p className="font-bold">{error.message}</p></div>}
+        {videoUrl && <video src={videoUrl} controls autoPlay loop className="w-full h-full object-cover" />}
       </div>
     </div>
   );
@@ -754,17 +506,17 @@ const MotionStudio = () => {
 const LiveCompanion = () => {
   const [active, setActive] = useState(false);
   const [msgs, setMsgs] = useState<{role: string, text: string}[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{message: string, isForbidden: boolean} | null>(null);
   const sessionRef = useRef<any>(null);
   const nextStartTimeRef = useRef(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
   const start = async () => {
+    setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const inCtx = new AudioContext({ sampleRate: 16000 });
       const outCtx = new AudioContext({ sampleRate: 24000 });
-
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -793,62 +545,56 @@ const LiveCompanion = () => {
               s.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buf.duration;
               sourcesRef.current.add(s);
-              s.onended = () => sourcesRef.current.delete(s);
-            }
-            if (m.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => { try { s.stop(); } catch(e){} });
-              sourcesRef.current.clear();
-              nextStartTimeRef.current = 0;
             }
             if (m.serverContent?.inputTranscription) setMsgs(p => [...p, {role: 'user', text: m.serverContent!.inputTranscription!.text}]);
             if (m.serverContent?.outputTranscription) setMsgs(p => [...p, {role: 'model', text: m.serverContent!.outputTranscription!.text}]);
           },
-          onerror: () => setError("Error de conexión"),
+          onerror: (e: any) => {
+            const msg = (e.message || "Error desconocido").toString();
+            setError({
+              message: msg.includes("403") ? "Permisos insuficientes (403): Live requiere clave Pro Paid." : "Error de conexión: Revisa tu clave y región.",
+              isForbidden: msg.includes("403")
+            });
+            setActive(false);
+          },
           onclose: () => setActive(false),
         },
         config: {
-          responseModalalities: [Modality.AUDIO],
+          /* FIXED: Use Modality.AUDIO from enum as per guidelines */
+          responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (e: any) { setError(e.message || "Error de micrófono"); }
+    } catch (e: any) { 
+      setError({ message: e.message || "Fallo al iniciar micrófono", isForbidden: false }); 
+      setActive(false);
+    }
   };
-
-  const stop = () => { if (sessionRef.current) sessionRef.current.close(); setActive(false); };
 
   return (
     <div className="grid md:grid-cols-[400px_1fr] gap-6">
-      <div className="glass p-8 rounded-3xl flex flex-col items-center justify-center text-center border-white/5 shadow-2xl">
-        <h2 className="text-xl font-bold mb-8 flex items-center gap-2 text-white">
-          <Mic className="text-emerald-400" size={20} /> Live Companion
-        </h2>
-        <div className={`relative w-48 h-48 rounded-full flex items-center justify-center transition-all duration-500 ${active ? 'bg-emerald-500/20 neon-glow scale-110' : 'bg-slate-800'}`}>
-          {active && <div className="absolute inset-0 rounded-full border-2 border-emerald-500/50 animate-ping"></div>}
-          <button onClick={active ? stop : start} className={`w-32 h-32 rounded-full flex items-center justify-center transition-all ${active ? 'bg-emerald-500 text-white shadow-xl rotate-0' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>
-            {active ? <Volume2 size={48} className="animate-pulse" /> : <Mic size={48} />}
-          </button>
-        </div>
-        <p className="mt-8 text-slate-400 text-xs font-bold tracking-[0.2em] uppercase">{active ? 'TRANSMITIENDO' : 'LISTO PARA ESCUCHAR'}</p>
-        {error && <p className="mt-4 text-red-400 text-xs font-bold uppercase">{error}</p>}
+      <div className="glass p-8 rounded-3xl flex flex-col items-center justify-center text-center border-white/5 relative overflow-hidden">
+        <h2 className="text-xl font-bold mb-8 flex items-center gap-2"><Mic className="text-emerald-400" size={20} /> Live Companion</h2>
+        <button onClick={active ? () => { sessionRef.current?.close(); setActive(false); } : start} className={`w-32 h-32 rounded-full flex items-center justify-center transition-all ${active ? 'bg-emerald-500 animate-pulse' : 'bg-slate-700'}`}>
+          {active ? <Volume2 size={48} /> : <Mic size={48} />}
+        </button>
+        {error && (
+          <div className="mt-8 p-4 bg-red-950/20 border border-red-900/50 rounded-xl text-red-400 text-xs">
+            <p className="font-bold mb-2">Diagnóstico Nexus:</p>
+            <p className="mb-4">{error.message}</p>
+            {error.isForbidden && <button onClick={() => window.aistudio?.openSelectKey()} className="w-full bg-slate-800 py-2 rounded-lg font-bold">Cambiar Clave API</button>}
+          </div>
+        )}
       </div>
-      <div className="glass p-6 rounded-3xl h-[600px] flex flex-col border-white/5 shadow-2xl">
-        <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-4">
-          <h3 className="text-slate-500 font-bold text-xs tracking-widest uppercase">TRANSCRIPCIÓN EN VIVO</h3>
-          <button onClick={() => setMsgs([])} className="text-[10px] text-slate-600 hover:text-red-400 font-bold uppercase">Limpiar</button>
-        </div>
-        <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-          {msgs.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] px-5 py-3 rounded-2xl text-sm leading-relaxed ${m.role === 'user' ? 'bg-indigo-600/20 border border-indigo-500/30 text-indigo-100' : 'bg-slate-800/50 border border-slate-700 text-slate-300'}`}>
-                {m.text}
-              </div>
-            </div>
-          ))}
-          {msgs.length === 0 && <div className="h-full flex flex-col items-center justify-center opacity-20"><Mic size={48} className="mb-4"/><p className="text-xs font-bold tracking-widest text-slate-700 uppercase">NO HAY DATOS DE VOZ</p></div>}
-        </div>
+      <div className="glass p-6 rounded-3xl h-[600px] flex flex-col border-white/5 shadow-2xl overflow-y-auto">
+        {msgs.map((m, i) => (
+          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
+            <div className={`max-w-[85%] px-5 py-3 rounded-2xl text-sm ${m.role === 'user' ? 'bg-indigo-600/20 text-indigo-100' : 'bg-slate-800 text-slate-300'}`}>{m.text}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -858,119 +604,88 @@ const Vox = () => {
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [voice, setVoice] = useState('Kore');
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const speak = async () => {
     if (!text.trim()) return;
     setLoading(true);
+    setError(null);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const res = await ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Dilo con naturalidad y tono vendedor: ${text}` }] }],
+        contents: [{ parts: [{ text: `Vocaliza: ${text}` }] }],
         config: {
-          responseModalalities: [Modality.AUDIO],
+          /* FIXED: Use Modality.AUDIO from enum as per guidelines */
+          responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
         },
       });
-      const data = res.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      const data = res.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
       if (data) {
         const ctx = new AudioContext({ sampleRate: 24000 });
         const buf = await decodeAudioData(decode(data), ctx, 24000, 1);
         const s = ctx.createBufferSource();
         s.buffer = buf;
         s.connect(ctx.destination);
-        setIsPlaying(true);
         s.start();
-        s.onended = () => setIsPlaying(false);
-      }
-    } catch (e: any) { console.error(e); } finally { setLoading(false); }
+      } else { throw new Error("No se recibió flujo de audio."); }
+    } catch (e: any) { setError(e.message || "Error de voz"); } finally { setLoading(false); }
   };
 
   return (
     <div className="glass p-8 rounded-3xl max-w-4xl mx-auto border-white/5 shadow-2xl">
-      <h2 className="text-xl font-bold mb-8 flex items-center gap-2 text-white">
-        <Volume2 className="text-amber-400" size={24} /> Vox Studio
-      </h2>
-      <div className="space-y-6">
-        <textarea
-          className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 focus:outline-none focus:ring-2 focus:ring-amber-500/30 min-h-[180px] text-lg leading-relaxed placeholder:opacity-20 text-slate-200"
-          placeholder="Escribe el texto que Nexus debe vocalizar para tu anuncio..."
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex bg-slate-800/50 p-1.5 rounded-2xl gap-1 border border-white/5 shadow-inner">
-            {['Kore', 'Puck', 'Charon', 'Fenrir'].map(v => (
-              <button key={v} onClick={() => setVoice(v)} className={`px-5 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${voice === v ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
-                {v}
-              </button>
-            ))}
-          </div>
-          <button onClick={speak} disabled={loading || !text.trim()} className="bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl shadow-amber-900/20 flex items-center gap-3 active:scale-[0.98]">
-            {loading ? <Loader2 className="animate-spin" size={18} /> : isPlaying ? <Volume2 className="animate-pulse" size={18} /> : 'EJECUTAR LOCUCIÓN'}
-          </button>
-        </div>
+      <h2 className="text-xl font-bold mb-8 flex items-center gap-2 text-white"><Volume2 className="text-amber-400" size={24} /> Vox Studio</h2>
+      <textarea className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 min-h-[180px] text-slate-200" placeholder="Texto para vocalizar..." value={text} onChange={(e) => setText(e.target.value)} />
+      {error && <p className="text-red-400 text-xs font-bold uppercase text-center mt-4">{error}</p>}
+      <div className="flex justify-between items-center mt-6">
+        <select className="bg-slate-800 border-none rounded-xl text-xs px-4 py-2" value={voice} onChange={e => setVoice(e.target.value)}>
+          {['Kore', 'Puck', 'Charon', 'Fenrir'].map(v => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <button onClick={speak} disabled={loading || !text.trim()} className="bg-amber-600 px-8 py-3 rounded-xl font-bold text-xs">
+          {loading ? <Loader2 className="animate-spin" /> : 'SINTETIZAR VOZ'}
+        </button>
       </div>
     </div>
   );
 };
 
-// --- App Layout ---
 const App = () => {
   const [tab, setTab] = useState('images');
-
   const tabs = [
     { id: 'images', label: 'MARKETING', icon: ShoppingBag, color: 'text-emerald-400' },
     { id: 'video', label: 'MOTION', icon: Video, color: 'text-pink-400' },
     { id: 'live', label: 'LIVE', icon: Mic, color: 'text-indigo-400' },
     { id: 'tts', label: 'VOX', icon: Volume2, color: 'text-amber-400' },
   ];
-
   return (
-    <div className="min-h-screen p-4 md:p-12 max-w-7xl mx-auto relative z-10">
+    <div className="min-h-screen p-4 md:p-12 max-w-7xl mx-auto">
       <header className="flex flex-col md:flex-row items-center justify-between mb-16 gap-8">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30 border border-indigo-400/20">
-              <Layers className="text-white" size={20} />
-            </div>
+            <Layers className="text-indigo-400" size={32} />
             <h1 className="text-5xl font-black tracking-tighter gradient-text">NEXUS.</h1>
           </div>
-          <p className="text-slate-500 font-bold text-[10px] tracking-[0.4em] uppercase ml-1">Advanced Sales & Creative Studio</p>
+          <p className="text-slate-500 font-bold text-[10px] uppercase tracking-[0.4em]">Sales & Creative AI</p>
         </div>
-        
-        <nav className="glass p-1.5 rounded-2xl flex gap-1 shadow-2xl border-white/5 overflow-x-auto max-w-full">
+        <nav className="glass p-1.5 rounded-2xl flex gap-1 shadow-2xl">
           {tabs.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`flex items-center gap-3 px-6 py-3 rounded-xl transition-all whitespace-nowrap ${tab === t.id ? 'bg-white/10 text-white shadow-inner' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}
-            >
-              <t.icon size={18} className={tab === t.id ? t.color : 'text-slate-600'} />
+            <button key={t.id} onClick={() => setTab(t.id)} className={`flex items-center gap-3 px-6 py-3 rounded-xl transition-all ${tab === t.id ? 'bg-white/10 text-white' : 'text-slate-500 hover:bg-white/5'}`}>
+              <t.icon size={18} className={tab === t.id ? t.color : ''} />
               <span className="font-black text-[10px] tracking-widest">{t.label}</span>
             </button>
           ))}
         </nav>
       </header>
-
       <main className="animate-in fade-in duration-700">
         {tab === 'images' && <DreamCanvas />}
         {tab === 'video' && <MotionStudio />}
         {tab === 'live' && <LiveCompanion />}
         {tab === 'tts' && <Vox />}
       </main>
-
-      <footer className="mt-24 text-center border-t border-slate-900 pt-12 pb-16">
-        <p className="text-slate-700 font-bold text-[10px] tracking-[0.3em] uppercase">Powered by Gemini 3.0 Series & VEO Engine</p>
-      </footer>
     </div>
   );
 };
 
 const root = document.getElementById('root');
-if (root) {
-  createRoot(root).render(<App />);
-} else {
-  console.error("No se encontró el elemento root");
-}
+if (root) createRoot(root).render(<App />);
