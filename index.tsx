@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -83,6 +84,34 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
   return buffer;
 }
 
+// Utility to create a WAV file from PCM data
+function createWavBlob(pcmData: Uint8Array, sampleRate: number): Blob {
+  const header = new ArrayBuffer(44);
+  const view = new DataView(header);
+
+  const writeString = (offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 32 + pcmData.length, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // Linear PCM
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // Byte rate
+  view.setUint16(32, 2, true); // Block align
+  view.setUint16(34, 16, true); // Bits per sample
+  writeString(36, 'data');
+  view.setUint32(40, pcmData.length, true);
+
+  return new Blob([header, pcmData], { type: 'audio/wav' });
+}
+
 // --- Shared History Component ---
 const HistorySection = ({ history, onSelect, onRemove, onClear, title, icon: Icon }: { 
   history: string[], 
@@ -133,7 +162,6 @@ const DreamCanvas = () => {
   const [marketingStyle, setMarketingStyle] = useState('Luxury Studio');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [qualityLevel, setQualityLevel] = useState(0); 
-  /* FIXED: Initializing batchSize with 1 instead of trying to use batchSize before its declaration */
   const [batchSize, setBatchSize] = useState(1);
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -151,7 +179,6 @@ const DreamCanvas = () => {
     if (saved) setHistory(JSON.parse(saved));
   }, []);
 
-  /* FIXED: Adding missing downloadImage helper function */
   const downloadImage = (url: string, index: number) => {
     const link = document.createElement('a');
     link.href = url;
@@ -419,273 +446,4 @@ const DreamCanvas = () => {
                 {error.isForbidden ? <Lock size={40} className="text-red-500" /> : <AlertCircle size={40} className="text-red-500" />}
                 <h3 className="font-black text-xs uppercase tracking-widest">{error.isForbidden ? "Acceso Restringido" : "Aviso de Sistema"}</h3>
                 <p className="text-sm font-medium leading-relaxed">{error.message}</p>
-                {error.isForbidden && (
-                  <button onClick={() => window.aistudio?.openSelectKey()} className="bg-emerald-600 text-white px-8 py-3 rounded-xl text-[10px] font-black uppercase mt-4">Configurar Clave Paid</button>
-                )}
-             </div>
-           </div>
-        ) : null}
-
-        {images.length > 0 && !loading && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-12">
-             {images.map((img, i) => (
-               <div key={i} className="group relative rounded-3xl overflow-hidden border border-white/5 bg-slate-900 shadow-2xl">
-                 <img src={img} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" alt={`Asset ${i+1}`} />
-                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-6">
-                    <button onClick={() => downloadImage(img, i)} className="bg-emerald-600 text-white p-4 rounded-2xl self-end shadow-xl">
-                      <Download size={20} />
-                    </button>
-                 </div>
-               </div>
-             ))}
-          </div>
-        )}
-      </main>
-    </div>
-  );
-};
-
-const MotionStudio = () => {
-  const [prompt, setPrompt] = useState('');
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState('');
-  const [error, setError] = useState<{message: string, isForbidden: boolean} | null>(null);
-
-  const generateVideo = async () => {
-    if (!prompt.trim()) return;
-    setLoading(true);
-    setError(null);
-    setStatus('Iniciando Motor Veo...');
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      let operation = await ai.models.generateVideos({
-        model: 'veo-3.1-fast-generate-preview',
-        prompt: prompt,
-        config: { numberOfVideos: 1, resolution: '1080p', aspectRatio: '16:9' }
-      });
-      while (!operation.done) {
-        setStatus("Renderizando Frames...");
-        await new Promise(r => setTimeout(r, 10000));
-        operation = await ai.operations.getVideosOperation({ operation: operation });
-      }
-      const link = operation.response?.generatedVideos?.[0]?.video?.uri;
-      if (link) {
-        const res = await fetch(`${link}&key=${process.env.API_KEY}`);
-        const blob = await res.blob();
-        setVideoUrl(URL.createObjectURL(blob));
-      }
-    } catch (err: any) {
-      setError({ message: err.message?.includes("403") ? "Error de Permisos (403): Veo requiere clave Pro." : err.message, isForbidden: err.message?.includes("403") });
-    } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="grid md:grid-cols-[350px_1fr] gap-6">
-      <div className="glass p-6 rounded-3xl h-fit border-white/5 shadow-2xl">
-        <h2 className="text-xl font-bold mb-6 flex items-center gap-2"><Video className="text-pink-400" size={20} /> Motion Studio</h2>
-        <textarea
-          className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-pink-500/50 min-h-[120px] text-sm resize-none text-slate-200"
-          placeholder="Escena cinemática..."
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-        <button onClick={generateVideo} disabled={loading || !prompt.trim()} className="w-full bg-pink-600 text-white py-4 rounded-2xl font-black text-xs tracking-[0.2em] mt-4">
-          {loading ? <Loader2 className="animate-spin mx-auto" size={18} /> : 'LANZAR CÁMARAS'}
-        </button>
-      </div>
-      <div className="glass rounded-3xl min-h-[500px] flex items-center justify-center bg-black overflow-hidden relative border-white/5">
-        {loading && <p className="text-pink-100 font-black tracking-[0.2em] uppercase">{status}</p>}
-        {error && <div className="text-red-400 p-8 text-center"><ShieldAlert size={40} className="mx-auto mb-4" /><p className="font-bold">{error.message}</p></div>}
-        {videoUrl && <video src={videoUrl} controls autoPlay loop className="w-full h-full object-cover" />}
-      </div>
-    </div>
-  );
-};
-
-const LiveCompanion = () => {
-  const [active, setActive] = useState(false);
-  const [msgs, setMsgs] = useState<{role: string, text: string}[]>([]);
-  const [error, setError] = useState<{message: string, isForbidden: boolean} | null>(null);
-  const sessionRef = useRef<any>(null);
-  const nextStartTimeRef = useRef(0);
-  const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
-
-  const start = async () => {
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const inCtx = new AudioContext({ sampleRate: 16000 });
-      const outCtx = new AudioContext({ sampleRate: 24000 });
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-        callbacks: {
-          onopen: () => {
-            const src = inCtx.createMediaStreamSource(stream);
-            const proc = inCtx.createScriptProcessor(4096, 1, 1);
-            proc.onaudioprocess = (e) => {
-              const data = e.inputBuffer.getChannelData(0);
-              const int16 = new Int16Array(data.length);
-              for (let i = 0; i < data.length; i++) int16[i] = data[i] * 32768;
-              sessionPromise.then(s => s.sendRealtimeInput({ media: { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' } }));
-            };
-            src.connect(proc);
-            proc.connect(inCtx.destination);
-            setActive(true);
-          },
-          onmessage: async (m: LiveServerMessage) => {
-            const audio = m.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (audio) {
-              const buf = await decodeAudioData(decode(audio), outCtx, 24000, 1);
-              const s = outCtx.createBufferSource();
-              s.buffer = buf;
-              s.connect(outCtx.destination);
-              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outCtx.currentTime);
-              s.start(nextStartTimeRef.current);
-              nextStartTimeRef.current += buf.duration;
-              sourcesRef.current.add(s);
-            }
-            if (m.serverContent?.inputTranscription) setMsgs(p => [...p, {role: 'user', text: m.serverContent!.inputTranscription!.text}]);
-            if (m.serverContent?.outputTranscription) setMsgs(p => [...p, {role: 'model', text: m.serverContent!.outputTranscription!.text}]);
-          },
-          onerror: (e: any) => {
-            const msg = (e.message || "Error desconocido").toString();
-            setError({
-              message: msg.includes("403") ? "Permisos insuficientes (403): Live requiere clave Pro Paid." : "Error de conexión: Revisa tu clave y región.",
-              isForbidden: msg.includes("403")
-            });
-            setActive(false);
-          },
-          onclose: () => setActive(false),
-        },
-        config: {
-          /* FIXED: Use Modality.AUDIO from enum as per guidelines */
-          responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-        }
-      });
-      sessionRef.current = await sessionPromise;
-    } catch (e: any) { 
-      setError({ message: e.message || "Fallo al iniciar micrófono", isForbidden: false }); 
-      setActive(false);
-    }
-  };
-
-  return (
-    <div className="grid md:grid-cols-[400px_1fr] gap-6">
-      <div className="glass p-8 rounded-3xl flex flex-col items-center justify-center text-center border-white/5 relative overflow-hidden">
-        <h2 className="text-xl font-bold mb-8 flex items-center gap-2"><Mic className="text-emerald-400" size={20} /> Live Companion</h2>
-        <button onClick={active ? () => { sessionRef.current?.close(); setActive(false); } : start} className={`w-32 h-32 rounded-full flex items-center justify-center transition-all ${active ? 'bg-emerald-500 animate-pulse' : 'bg-slate-700'}`}>
-          {active ? <Volume2 size={48} /> : <Mic size={48} />}
-        </button>
-        {error && (
-          <div className="mt-8 p-4 bg-red-950/20 border border-red-900/50 rounded-xl text-red-400 text-xs">
-            <p className="font-bold mb-2">Diagnóstico Nexus:</p>
-            <p className="mb-4">{error.message}</p>
-            {error.isForbidden && <button onClick={() => window.aistudio?.openSelectKey()} className="w-full bg-slate-800 py-2 rounded-lg font-bold">Cambiar Clave API</button>}
-          </div>
-        )}
-      </div>
-      <div className="glass p-6 rounded-3xl h-[600px] flex flex-col border-white/5 shadow-2xl overflow-y-auto">
-        {msgs.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
-            <div className={`max-w-[85%] px-5 py-3 rounded-2xl text-sm ${m.role === 'user' ? 'bg-indigo-600/20 text-indigo-100' : 'bg-slate-800 text-slate-300'}`}>{m.text}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const Vox = () => {
-  const [text, setText] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [voice, setVoice] = useState('Kore');
-  const [error, setError] = useState<string | null>(null);
-
-  const speak = async () => {
-    if (!text.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const res = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Vocaliza: ${text}` }] }],
-        config: {
-          /* FIXED: Use Modality.AUDIO from enum as per guidelines */
-          responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
-        },
-      });
-      const data = res.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
-      if (data) {
-        const ctx = new AudioContext({ sampleRate: 24000 });
-        const buf = await decodeAudioData(decode(data), ctx, 24000, 1);
-        const s = ctx.createBufferSource();
-        s.buffer = buf;
-        s.connect(ctx.destination);
-        s.start();
-      } else { throw new Error("No se recibió flujo de audio."); }
-    } catch (e: any) { setError(e.message || "Error de voz"); } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="glass p-8 rounded-3xl max-w-4xl mx-auto border-white/5 shadow-2xl">
-      <h2 className="text-xl font-bold mb-8 flex items-center gap-2 text-white"><Volume2 className="text-amber-400" size={24} /> Vox Studio</h2>
-      <textarea className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 min-h-[180px] text-slate-200" placeholder="Texto para vocalizar..." value={text} onChange={(e) => setText(e.target.value)} />
-      {error && <p className="text-red-400 text-xs font-bold uppercase text-center mt-4">{error}</p>}
-      <div className="flex justify-between items-center mt-6">
-        <select className="bg-slate-800 border-none rounded-xl text-xs px-4 py-2" value={voice} onChange={e => setVoice(e.target.value)}>
-          {['Kore', 'Puck', 'Charon', 'Fenrir'].map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <button onClick={speak} disabled={loading || !text.trim()} className="bg-amber-600 px-8 py-3 rounded-xl font-bold text-xs">
-          {loading ? <Loader2 className="animate-spin" /> : 'SINTETIZAR VOZ'}
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const App = () => {
-  const [tab, setTab] = useState('images');
-  const tabs = [
-    { id: 'images', label: 'MARKETING', icon: ShoppingBag, color: 'text-emerald-400' },
-    { id: 'video', label: 'MOTION', icon: Video, color: 'text-pink-400' },
-    { id: 'live', label: 'LIVE', icon: Mic, color: 'text-indigo-400' },
-    { id: 'tts', label: 'VOX', icon: Volume2, color: 'text-amber-400' },
-  ];
-  return (
-    <div className="min-h-screen p-4 md:p-12 max-w-7xl mx-auto">
-      <header className="flex flex-col md:flex-row items-center justify-between mb-16 gap-8">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <Layers className="text-indigo-400" size={32} />
-            <h1 className="text-5xl font-black tracking-tighter gradient-text">NEXUS.</h1>
-          </div>
-          <p className="text-slate-500 font-bold text-[10px] uppercase tracking-[0.4em]">Sales & Creative AI</p>
-        </div>
-        <nav className="glass p-1.5 rounded-2xl flex gap-1 shadow-2xl">
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} className={`flex items-center gap-3 px-6 py-3 rounded-xl transition-all ${tab === t.id ? 'bg-white/10 text-white' : 'text-slate-500 hover:bg-white/5'}`}>
-              <t.icon size={18} className={tab === t.id ? t.color : ''} />
-              <span className="font-black text-[10px] tracking-widest">{t.label}</span>
-            </button>
-          ))}
-        </nav>
-      </header>
-      <main className="animate-in fade-in duration-700">
-        {tab === 'images' && <DreamCanvas />}
-        {tab === 'video' && <MotionStudio />}
-        {tab === 'live' && <LiveCompanion />}
-        {tab === 'tts' && <Vox />}
-      </main>
-    </div>
-  );
-};
-
-const root = document.getElementById('root');
-if (root) createRoot(root).render(<App />);
+                {error.isForbidden &&
