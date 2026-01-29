@@ -35,7 +35,12 @@ import {
   Target,
   ShoppingBag,
   TrendingUp,
-  MessageSquare
+  MessageSquare,
+  Mail,
+  Store,
+  Palette,
+  ExternalLink,
+  Settings2
 } from 'lucide-react';
 
 // --- Utilities ---
@@ -122,15 +127,18 @@ const HistorySection = ({ history, onSelect, onRemove, onClear, title, icon: Ico
 const DreamCanvas = () => {
   const [prompt, setPrompt] = useState('');
   const [campaignGoal, setCampaignGoal] = useState('');
+  const [marketingStyle, setMarketingStyle] = useState('Luxury Studio');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [qualityLevel, setQualityLevel] = useState(0); 
+  const [batchSize, setBatchSize] = useState(1);
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [error, setError] = useState<{message: string, isQuota: boolean} | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [refImage, setRefImage] = useState<{data: string, mime: string} | null>(null);
-  const [postVariations, setPostVariations] = useState<{instagram: string, linkedin: string, twitter: string} | null>(null);
-  const [activePostTab, setActivePostTab] = useState<'instagram' | 'linkedin' | 'twitter'>('instagram');
+  const [postVariations, setPostVariations] = useState<{instagram: string, linkedin: string, twitter: string, email: string, ecommerce: string} | null>(null);
+  const [activePostTab, setActivePostTab] = useState<'instagram' | 'linkedin' | 'twitter' | 'email' | 'ecommerce'>('instagram');
   const [writingPost, setWritingPost] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -161,7 +169,7 @@ const DreamCanvas = () => {
 
   const getQualityLabel = (level: number) => {
     switch (level) {
-      case 0: return { label: 'Standard', icon: Zap, color: 'text-slate-400' };
+      case 0: return { label: 'Standard (Fast)', icon: Zap, color: 'text-slate-400' };
       case 1: return { label: 'HD (1K)', icon: Award, color: 'text-indigo-400' };
       case 2: return { label: 'Ultra HD (2K)', icon: Crown, color: 'text-amber-400' };
       default: return { label: 'Standard', icon: Zap, color: 'text-slate-400' };
@@ -184,8 +192,12 @@ const DreamCanvas = () => {
 
     setLoading(true);
     setError(null);
+    // Preservar imágenes anteriores si es posible o limpiar según flujo
     setImages([]);
     setPostVariations(null);
+    setCurrentStep(0);
+    
+    const validResults: string[] = [];
     
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -194,51 +206,78 @@ const DreamCanvas = () => {
       if (qualityLevel === 1) imageConfig.imageSize = "1K";
       if (qualityLevel === 2) imageConfig.imageSize = "2K";
 
-      // Enriquecer el prompt para marketing
-      const marketingEnhancedPrompt = `High-end professional commercial product photography. Marketing style, sleek lighting, clean composition, luxury advertisement look. Subject: ${prompt}. ${campaignGoal ? `Focus on: ${campaignGoal}` : ''}`;
+      const styles: Record<string, string> = {
+        'Luxury Studio': 'High-end luxury commercial studio photography, soft bokeh, cinematic lighting, sharp focus on product.',
+        'Minimalist': 'Clean minimalist aesthetic, white space, soft shadows, geometric composition, modern look.',
+        'Vibrant Tech': 'Cyberpunk neon aesthetics, sharp reflections, high contrast, tech-forward commercial style.',
+        'Urban Lifestyle': 'Natural sunlight, authentic urban setting, depth of field, lifestyle marketing photography.'
+      };
 
-      const tasks = Array.from({ length: 5 }).map(async (_, i) => {
-        const parts: any[] = [{ text: `${marketingEnhancedPrompt} --variation ${i + 1} --v 6` }];
+      const marketingEnhancedPrompt = `${styles[marketingStyle]} Subject: ${prompt}. Campaign goal: ${campaignGoal || 'High impact sales advertisement'}. professional commercial grade.`;
+
+      for (let i = 0; i < batchSize; i++) {
+        setCurrentStep(i + 1);
+        const parts: any[] = [{ text: `${marketingEnhancedPrompt} --variation ${i + 1} --v 6.1` }];
         if (refImage) {
           parts.unshift({
-            inlineData: {
-              data: refImage.data,
-              mimeType: refImage.mime
-            }
+            inlineData: { data: refImage.data, mimeType: refImage.mime }
           });
         }
 
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: { parts },
-          config: { imageConfig }
-        });
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: { parts },
+            config: { imageConfig }
+          });
 
-        const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
-        return part ? `data:image/png;base64,${part.inlineData.data}` : null;
-      });
+          const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+          if (part) {
+            const newImg = `data:image/png;base64,${part.inlineData.data}`;
+            validResults.push(newImg);
+            setImages([...validResults]);
+          }
+        } catch (innerErr: any) {
+          const isQuotaError = innerErr.message?.includes("429") || innerErr.message?.includes("quota") || innerErr.message?.includes("exhausted");
+          
+          if (isQuotaError) {
+            // Intento de fallback automático a Flash si el Pro falló por cuota
+            if (modelName === 'gemini-3-pro-image-preview') {
+              modelName = 'gemini-2.5-flash-image';
+              // Reintentar esta iteración con Flash
+              i--; 
+              await new Promise(r => setTimeout(r, 2000)); // Pausa mayor para resetear
+              continue;
+            }
 
-      const results = await Promise.all(tasks);
-      const validImages = results.filter((img): img is string => img !== null);
-      
-      if (validImages.length > 0) {
-        setImages(validImages);
+            setError({
+              message: "Límite de cuota excedido (Error 429). La API de Gemini tiene límites estrictos para imágenes. Intenta reducir la cantidad de variaciones o espera 60 segundos.",
+              isQuota: true
+            });
+            break;
+          } else {
+            throw innerErr;
+          }
+        }
+        
+        // Retardo mayor entre peticiones secuenciales para mitigar 429
+        if (i < batchSize - 1) await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+
+      if (validResults.length > 0) {
         saveToHistory(prompt);
-      } else {
-        throw new Error("No se pudieron generar imágenes.");
       }
     } catch (err: any) {
-      setError(err.message || "Error al generar imagen");
-      if (qualityLevel > 0 && err.message?.includes("Requested entity was not found") && window.aistudio) {
-        // @ts-ignore
-        window.aistudio.openSelectKey();
-      }
+      setError({
+        message: err.message || "Error inesperado al generar imagen",
+        isQuota: err.message?.includes("429") || err.message?.includes("quota")
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const createSocialPosts = async () => {
+  const createMarketingSuite = async () => {
     if (images.length === 0) return;
     setWritingPost(true);
     try {
@@ -249,16 +288,10 @@ const DreamCanvas = () => {
         contents: {
           parts: [
             { inlineData: { data: base64Data, mimeType: 'image/png' } },
-            { text: `Actúa como un experto en Marketing de Ventas y Copywriting de alto impacto. 
-            Genera 3 variaciones de posts persuasivos para vender un producto/servicio basado en esta imagen.
-            Contexto del producto: "${prompt}".
-            Objetivo de la campaña: "${campaignGoal || 'Aumentar ventas y atraer clientes'}".
+            { text: `Genera una SUITE DE MARKETING completa basada en esta imagen.
+            Producto: "${prompt}". Objetivo: "${campaignGoal || 'Conversión'}".
             
-            Reglas de redacción:
-            - Usa la estructura AIDA (Atención, Interés, Deseo, Acción).
-            - Enfócate en beneficios, no solo en características.
-            - Incluye un "Call to Action" (CTA) irresistible.
-            - Devuelve un objeto JSON con las claves: "instagram", "linkedin", "twitter".` }
+            Retorna un JSON con: instagram, linkedin, twitter, email, ecommerce. Usa copywriting persuasivo AIDA.` }
           ]
         },
         config: {
@@ -268,15 +301,17 @@ const DreamCanvas = () => {
             properties: {
               instagram: { type: Type.STRING },
               linkedin: { type: Type.STRING },
-              twitter: { type: Type.STRING }
+              twitter: { type: Type.STRING },
+              email: { type: Type.STRING },
+              ecommerce: { type: Type.STRING }
             }
           }
         }
       });
       const data = JSON.parse(response.text);
       setPostVariations(data);
-    } catch (e) {
-      setError("Error al redactar variaciones de posts de marketing.");
+    } catch (e: any) {
+      setError({ message: "Error en copywriting: " + e.message, isQuota: e.message?.includes("429") });
     } finally {
       setWritingPost(false);
     }
@@ -285,7 +320,7 @@ const DreamCanvas = () => {
   const downloadImage = (url: string, index: number) => {
     const link = document.createElement('a');
     link.href = url;
-    link.download = `nexus-marketing-${Date.now()}-${index + 1}.png`;
+    link.download = `nexus-sales-${index + 1}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -300,72 +335,78 @@ const DreamCanvas = () => {
   };
 
   return (
-    <div className="grid lg:grid-cols-[380px_1fr] gap-8">
+    <div className="grid lg:grid-cols-[400px_1fr] gap-8">
       <aside className="space-y-6">
-        <div className="glass p-6 rounded-3xl h-fit border-white/5 shadow-2xl">
-          <div className="flex items-center gap-2 mb-6">
-            <ShoppingBag className="text-indigo-400" size={20} />
-            <h2 className="text-xl font-bold text-white">Marketing Studio</h2>
+        <div className="glass p-6 rounded-3xl h-fit border-white/5 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-4 opacity-10">
+            <Settings2 size={40} />
+          </div>
+          
+          <div className="flex items-center gap-3 mb-8">
+            <div className="p-2 bg-emerald-500/20 rounded-lg">
+              <ShoppingBag className="text-emerald-400" size={24} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white">Marketing Studio</h2>
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Quota-Aware Engine</p>
+            </div>
           </div>
           
           <div className="space-y-6">
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2">
-                <Target size={12} /> Objetivo de Venta / USP
+                <Target size={12} className="text-emerald-400" /> Objetivo Comercial
               </label>
               <input
                 className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-xs text-slate-200"
-                placeholder="Ej: Descuento 20%, Calidad Premium, Envío gratis..."
+                placeholder="Ej: Promo 2x1, Calidad Premium..."
                 value={campaignGoal}
                 onChange={(e) => setCampaignGoal(e.target.value)}
               />
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Producto o Concepto</label>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2">
+                <Palette size={12} className="text-indigo-400" /> Look & Feel
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {['Luxury Studio', 'Minimalist', 'Vibrant Tech', 'Urban Lifestyle'].map(style => (
+                  <button
+                    key={style}
+                    onClick={() => setMarketingStyle(style)}
+                    className={`py-2 px-1 rounded-xl text-[9px] font-black transition-all border ${marketingStyle === style ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg' : 'bg-slate-800/50 border-slate-700 text-slate-500 hover:bg-slate-700'}`}
+                  >
+                    {style}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Concepto</label>
               <textarea
-                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 min-h-[100px] text-sm resize-none text-slate-200"
-                placeholder="Ej: Un reloj de lujo minimalista sobre una mesa de mármol..."
+                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 min-h-[80px] text-sm resize-none text-slate-200"
+                placeholder="Producto y escenario..."
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Referencia Visual</label>
-              <div className="relative group">
-                <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" id="img-upload" />
-                <label 
-                  htmlFor="img-upload"
-                  className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-4 transition-all cursor-pointer ${refImage ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-slate-800 hover:border-slate-700 hover:bg-white/5'}`}
-                >
-                  {refImage ? (
-                    <div className="relative w-full h-24">
-                      <img src={`data:${refImage.mime};base64,${refImage.data}`} className="w-full h-full object-cover rounded-lg shadow-lg" alt="Ref" />
-                      <button onClick={(e) => { e.preventDefault(); setRefImage(null); }} className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-400">
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <Upload className="text-slate-600 mb-2 group-hover:text-indigo-400 transition-colors" size={20} />
-                      <span className="text-[10px] text-slate-500 font-bold uppercase">Subir Foto de Producto</span>
-                    </>
-                  )}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                  <Layers size={12} className="text-amber-400" /> Variaciones ({batchSize})
                 </label>
+                <span className="text-[9px] text-slate-600 font-bold uppercase tracking-tighter">1 es más seguro para evitar error 429</span>
               </div>
-            </div>
-            
-            <div className="space-y-3">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Formato de Ads</label>
-              <div className="grid grid-cols-4 gap-2">
-                {['1:1', '16:9', '9:16', '4:3'].map(ratio => (
+              <div className="grid grid-cols-5 gap-1">
+                {[1, 2, 3, 4, 5].map(n => (
                   <button
-                    key={ratio}
-                    onClick={() => setAspectRatio(ratio)}
-                    className={`py-2 rounded-xl text-[10px] font-black transition-all border ${aspectRatio === ratio ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg' : 'bg-slate-800/50 border-slate-700 text-slate-500 hover:bg-slate-700'}`}
+                    key={n}
+                    onClick={() => setBatchSize(n)}
+                    className={`py-2 rounded-lg text-[10px] font-black transition-all border ${batchSize === n ? 'bg-amber-500 border-amber-400 text-slate-950 shadow-lg' : 'bg-slate-800/50 border-slate-700 text-slate-500 hover:bg-slate-700'}`}
                   >
-                    {ratio}
+                    {n}
                   </button>
                 ))}
               </div>
@@ -373,7 +414,7 @@ const DreamCanvas = () => {
 
             <div className="space-y-4">
               <div className="flex items-center justify-between px-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Resolución Comercial</label>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Motor / Calidad</label>
                 <div className={`flex items-center gap-1 text-[10px] font-black uppercase ${currentQuality.color}`}>
                   <currentQuality.icon size={12} />
                   {currentQuality.label}
@@ -383,19 +424,19 @@ const DreamCanvas = () => {
                 type="range" min="0" max="2" step="1"
                 value={qualityLevel}
                 onChange={(e) => setQualityLevel(parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
               />
             </div>
 
             <button
               onClick={generateImage}
               disabled={loading || !prompt.trim()}
-              className={`w-full py-4 rounded-2xl font-black text-xs tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg ${loading ? 'bg-slate-800 text-slate-600' : 'bg-gradient-to-br from-indigo-600 via-indigo-500 to-emerald-600 hover:scale-[1.02] text-white shadow-indigo-900/20 active:scale-[0.98]'}`}
+              className={`w-full py-4 rounded-2xl font-black text-xs tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg ${loading ? 'bg-slate-800 text-slate-600' : 'bg-gradient-to-br from-emerald-600 via-emerald-500 to-indigo-600 hover:scale-[1.02] text-white shadow-emerald-900/20 active:scale-[0.98]'}`}
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : (
                 <>
                   <TrendingUp size={16} /> 
-                  LANZAR CAMPAÑA (x5)
+                  SINTETIZAR ANUNCIOS
                 </>
               )}
             </button>
@@ -405,50 +446,51 @@ const DreamCanvas = () => {
               onSelect={setPrompt} 
               onRemove={removeHistoryItem}
               onClear={() => { setHistory([]); localStorage.removeItem('nexus_dream_history'); }}
-              title="CAMPAÑAS PREVIAS"
+              title="BRIEFS RECIENTES"
               icon={Clock} 
             />
           </div>
         </div>
 
         {images.length > 0 && (
-          <div className="glass p-6 rounded-3xl border-white/5 animate-in slide-in-from-bottom duration-500">
-             <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <MessageSquare size={14} /> Marketing Copy Hooks
+          <div className="glass p-6 rounded-3xl border-white/5 animate-in slide-in-from-bottom duration-500 shadow-2xl">
+             <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <MessageSquare size={14} className="text-emerald-400" /> Copy Strategy
              </h3>
              {postVariations ? (
                <div className="space-y-4">
-                  <div className="flex bg-slate-900/50 p-1 rounded-xl gap-1">
+                  <div className="flex bg-slate-900/50 p-1 rounded-xl gap-1 overflow-x-auto">
                     {[
-                      { id: 'instagram', icon: Instagram, label: 'IG' },
-                      { id: 'linkedin', icon: Linkedin, label: 'LI' },
-                      { id: 'twitter', icon: Twitter, label: 'X' }
+                      { id: 'instagram', icon: Instagram },
+                      { id: 'linkedin', icon: Linkedin },
+                      { id: 'twitter', icon: Twitter },
+                      { id: 'email', icon: Mail },
+                      { id: 'ecommerce', icon: Store }
                     ].map(tab => (
                       <button 
                         key={tab.id}
                         onClick={() => setActivePostTab(tab.id as any)}
-                        className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-2 transition-all ${activePostTab === tab.id ? 'bg-white/10 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
+                        className={`min-w-[40px] flex-1 py-2 rounded-lg flex items-center justify-center transition-all ${activePostTab === tab.id ? 'bg-white/10 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
                       >
-                        <tab.icon size={14} />
-                        <span className="text-[9px] font-black">{tab.label}</span>
+                        <tab.icon size={16} />
                       </button>
                     ))}
                   </div>
-                  <div className="bg-slate-900/80 rounded-2xl p-4 text-xs text-slate-300 leading-relaxed max-h-64 overflow-y-auto border border-white/5 font-sans whitespace-pre-wrap">
+                  <div className="bg-slate-950/80 rounded-2xl p-4 text-xs text-slate-300 leading-relaxed max-h-72 overflow-y-auto border border-white/5 font-sans whitespace-pre-wrap">
                     {postVariations[activePostTab]}
                   </div>
                   <button onClick={copyToClipboard} className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-xl text-[10px] font-black tracking-widest flex items-center justify-center gap-2 transition-all">
                     {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    {copied ? 'COPIADO' : 'COPIAR COPY'}
+                    {copied ? 'COPIADO' : 'COPIAR CONTENIDO'}
                   </button>
                </div>
              ) : (
                 <button 
-                  onClick={createSocialPosts}
+                  onClick={createMarketingSuite}
                   disabled={writingPost}
                   className="w-full bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 py-4 rounded-2xl text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-2"
                 >
-                  {writingPost ? <Loader2 className="animate-spin" size={14} /> : 'GENERAR ESTRATEGIA DE VENTA'}
+                  {writingPost ? <Loader2 className="animate-spin" size={14} /> : 'GENERAR TEXTOS DE VENTA'}
                 </button>
              )}
           </div>
@@ -457,55 +499,98 @@ const DreamCanvas = () => {
 
       <main className="space-y-6">
         {loading ? (
-          <div className="glass rounded-3xl min-h-[600px] flex flex-col items-center justify-center gap-8 relative overflow-hidden">
-            <div className="absolute inset-0 bg-indigo-600/5 animate-pulse"></div>
+          <div className="glass rounded-3xl min-h-[600px] flex flex-col items-center justify-center gap-8 relative overflow-hidden border-white/5 shadow-2xl">
+            <div className="absolute inset-0 bg-emerald-600/5 animate-pulse"></div>
             <div className="relative">
-              <div className="w-24 h-24 border-4 border-indigo-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
+              <div className="w-24 h-24 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
               <ShoppingBag className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-400" size={32} />
             </div>
             <div className="text-center space-y-2">
-               <p className="text-emerald-100 font-black tracking-[0.4em] text-sm uppercase">Generando Catálogo Visual...</p>
-               <p className="text-slate-500 text-[10px] font-bold uppercase">Nexus está renderizando 5 variaciones de alto impacto</p>
+               <p className="text-emerald-100 font-black tracking-[0.5em] text-sm uppercase">Componiendo Asset {currentStep}/{batchSize}...</p>
+               <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest px-12 leading-loose">Para evitar errores de cuota (429), Nexus procesa las imágenes de forma secuencial.</p>
             </div>
           </div>
         ) : error ? (
-           <div className="glass rounded-3xl min-h-[600px] flex items-center justify-center">
-             <div className="text-red-400 p-8 flex items-center gap-3 bg-red-950/20 border border-red-900/50 rounded-2xl max-w-md mx-4">
-                <AlertCircle size={24} className="flex-shrink-0" /> 
-                <span className="text-sm font-medium">{error}</span>
+           <div className="glass rounded-3xl min-h-[400px] flex flex-col items-center justify-center border-red-500/10 shadow-2xl p-8">
+             <div className="text-red-400 p-8 flex flex-col items-center gap-4 bg-red-950/20 border border-red-900/50 rounded-2xl max-w-lg mx-4 text-center animate-in zoom-in duration-300">
+                <AlertCircle size={40} className="text-red-500" /> 
+                <h3 className="font-black text-xs uppercase tracking-widest">Aviso de Cuota API (Rate Limit)</h3>
+                <p className="text-sm font-medium leading-relaxed">{error.message}</p>
+                {error.isQuota && (
+                  <div className="flex flex-col gap-2 w-full mt-4">
+                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-2">Sugerencia: Usa el motor "Standard (Fast)" y "Variaciones: 1" para el plan gratuito.</p>
+                    <div className="flex gap-2">
+                      <a 
+                        href="https://ai.google.dev/gemini-api/docs/billing" 
+                        target="_blank" 
+                        className="flex-1 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 py-3 rounded-xl text-[10px] font-black uppercase transition-all"
+                      >
+                        <ExternalLink size={12} /> Billing Info
+                      </a>
+                      {window.aistudio && (
+                        <button 
+                          onClick={() => window.aistudio.openSelectKey()}
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-[10px] font-black uppercase transition-all shadow-lg shadow-emerald-900/40"
+                        >
+                          Usar Paid Key
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
              </div>
+             {images.length > 0 && (
+               <div className="mt-8 text-center">
+                 <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-6">Nexus pudo recuperar {images.length} imágenes antes del límite:</p>
+                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {images.map((img, i) => (
+                      <div key={i} className="relative aspect-square rounded-2xl overflow-hidden border border-white/5 shadow-xl group">
+                         <img src={img} className="w-full h-full object-cover" />
+                         <button onClick={() => downloadImage(img, i)} className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Download size={24} className="text-white" />
+                         </button>
+                      </div>
+                    ))}
+                 </div>
+               </div>
+             )}
            </div>
-        ) : images.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-700 pb-12">
+        ) : null}
+
+        {images.length > 0 && !loading && !error && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-right duration-700 pb-12">
              {images.map((img, i) => (
-               <div key={i} className={`group relative rounded-3xl overflow-hidden border border-white/5 bg-slate-900 shadow-xl ${i === 0 ? 'md:col-span-2 md:row-span-2' : ''}`}>
-                 <img src={img} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" alt={`Ad ${i+1}`} />
-                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-6">
+               <div key={i} className={`group relative rounded-3xl overflow-hidden border border-white/5 bg-slate-900 shadow-2xl ${i === 0 && images.length > 1 ? 'md:col-span-2 md:row-span-2' : ''}`}>
+                 <img src={img} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" alt={`Marketing gen ${i+1}`} />
+                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-6 backdrop-blur-[2px]">
                     <div className="flex items-center justify-between">
                        <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-white tracking-widest uppercase">MKT ASSET #{i+1}</span>
-                        <span className="text-[9px] text-emerald-400 font-bold uppercase">Ready for Ads</span>
+                        <span className="text-[10px] font-black text-white tracking-[0.2em] uppercase">MKT ASSET v{i+1}</span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                          <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest">High-End Conversion</span>
+                        </div>
                        </div>
-                       <div className="flex gap-2">
-                        <button 
-                          onClick={() => downloadImage(img, i)}
-                          className="bg-emerald-600 hover:bg-emerald-500 backdrop-blur-md text-white p-3 rounded-2xl transition-all active:scale-95 shadow-lg shadow-emerald-900/40"
-                        >
-                          <Download size={18} />
-                        </button>
-                       </div>
+                       <button 
+                        onClick={() => downloadImage(img, i)}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white p-4 rounded-2xl transition-all active:scale-90 shadow-xl shadow-emerald-900/40"
+                       >
+                         <Download size={20} />
+                       </button>
                     </div>
                  </div>
                </div>
              ))}
           </div>
-        ) : (
-          <div className="glass rounded-3xl min-h-[600px] flex items-center justify-center group">
-            <div className="text-slate-700 text-center">
-              <div className="w-24 h-24 mx-auto mb-6 bg-slate-900/50 rounded-full flex items-center justify-center border border-slate-800 opacity-20 group-hover:opacity-40 transition-all duration-700 group-hover:rotate-12">
-                 <ShoppingBag size={40} />
+        )}
+
+        {!loading && !error && images.length === 0 && (
+          <div className="glass rounded-3xl min-h-[600px] flex items-center justify-center group shadow-2xl border-white/5">
+            <div className="text-slate-800 text-center flex flex-col items-center">
+              <div className="w-24 h-24 mb-6 bg-slate-900/50 rounded-[2.5rem] flex items-center justify-center border border-slate-800 opacity-20 group-hover:opacity-50 transition-all duration-1000 group-hover:rotate-[360deg] group-hover:bg-emerald-500/10 group-hover:border-emerald-500/30">
+                 <ShoppingBag size={40} className="group-hover:text-emerald-400 transition-colors" />
               </div>
-              <p className="font-bold tracking-[0.5em] text-[10px] uppercase opacity-20">Esperando Brief de Producto</p>
+              <p className="font-black tracking-[0.6em] text-[10px] uppercase opacity-10 group-hover:opacity-40 transition-opacity">Nexus Studio Ready</p>
             </div>
           </div>
         )}
@@ -605,7 +690,7 @@ const MotionStudio = () => {
 
   return (
     <div className="grid md:grid-cols-[350px_1fr] gap-6">
-      <div className="glass p-6 rounded-3xl h-fit border-white/5">
+      <div className="glass p-6 rounded-3xl h-fit border-white/5 shadow-2xl">
         <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
           <Video className="text-pink-400" size={20} /> Motion Studio
         </h2>
@@ -647,7 +732,7 @@ const MotionStudio = () => {
             <p className="text-slate-500 text-[10px] uppercase font-bold">Tiempo estimado: 2-3 minutos</p>
           </div>
         )}
-        {error && <div className="text-red-400 p-8 flex items-center gap-3 bg-red-950/20 border border-red-900/50 rounded-2xl"><AlertCircle size={24} /> {error}</div>}
+        {error && <div className="text-red-400 p-8 flex items-center gap-3 bg-red-950/20 border border-red-900/50 rounded-2xl shadow-xl shadow-red-900/20"><AlertCircle size={24} /> {error}</div>}
         {videoUrl ? (
           <div className="relative w-full h-full group">
             <video src={videoUrl} controls autoPlay loop className="w-full h-full object-cover" />
@@ -722,7 +807,7 @@ const LiveCompanion = () => {
           onclose: () => setActive(false),
         },
         config: {
-          responseModalities: [Modality.AUDIO],
+          responseModalalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -762,7 +847,7 @@ const LiveCompanion = () => {
               </div>
             </div>
           ))}
-          {msgs.length === 0 && <div className="h-full flex flex-col items-center justify-center opacity-20"><Mic size={48} className="mb-4"/><p className="text-xs font-bold tracking-widest text-slate-700">NO HAY DATOS DE VOZ</p></div>}
+          {msgs.length === 0 && <div className="h-full flex flex-col items-center justify-center opacity-20"><Mic size={48} className="mb-4"/><p className="text-xs font-bold tracking-widest text-slate-700 uppercase">NO HAY DATOS DE VOZ</p></div>}
         </div>
       </div>
     </div>
@@ -782,7 +867,7 @@ const Vox = () => {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const res = await ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Dilo con naturalidad: ${text}` }] }],
+        contents: [{ parts: [{ text: `Dilo con naturalidad y tono vendedor: ${text}` }] }],
         config: {
           responseModalalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
@@ -799,7 +884,7 @@ const Vox = () => {
         s.start();
         s.onended = () => setIsPlaying(false);
       }
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e: any) { console.error(e); } finally { setLoading(false); }
   };
 
   return (
@@ -810,12 +895,12 @@ const Vox = () => {
       <div className="space-y-6">
         <textarea
           className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 focus:outline-none focus:ring-2 focus:ring-amber-500/30 min-h-[180px] text-lg leading-relaxed placeholder:opacity-20 text-slate-200"
-          placeholder="Escribe el texto que Nexus debe vocalizar..."
+          placeholder="Escribe el texto que Nexus debe vocalizar para tu anuncio..."
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex bg-slate-800/50 p-1.5 rounded-2xl gap-1 border border-white/5">
+          <div className="flex bg-slate-800/50 p-1.5 rounded-2xl gap-1 border border-white/5 shadow-inner">
             {['Kore', 'Puck', 'Charon', 'Fenrir'].map(v => (
               <button key={v} onClick={() => setVoice(v)} className={`px-5 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${voice === v ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
                 {v}
@@ -823,7 +908,7 @@ const Vox = () => {
             ))}
           </div>
           <button onClick={speak} disabled={loading || !text.trim()} className="bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl shadow-amber-900/20 flex items-center gap-3 active:scale-[0.98]">
-            {loading ? <Loader2 className="animate-spin" size={18} /> : isPlaying ? <Volume2 className="animate-pulse" size={18} /> : 'EJECUTAR VOZ'}
+            {loading ? <Loader2 className="animate-spin" size={18} /> : isPlaying ? <Volume2 className="animate-pulse" size={18} /> : 'EJECUTAR LOCUCIÓN'}
           </button>
         </div>
       </div>
@@ -852,15 +937,15 @@ const App = () => {
             </div>
             <h1 className="text-5xl font-black tracking-tighter gradient-text">NEXUS.</h1>
           </div>
-          <p className="text-slate-500 font-bold text-[10px] tracking-[0.4em] uppercase ml-1">Multi-Modal Generative AI for Sales</p>
+          <p className="text-slate-500 font-bold text-[10px] tracking-[0.4em] uppercase ml-1">Advanced Sales & Creative Studio</p>
         </div>
         
-        <nav className="glass p-1.5 rounded-2xl flex gap-1 shadow-2xl border-white/5">
+        <nav className="glass p-1.5 rounded-2xl flex gap-1 shadow-2xl border-white/5 overflow-x-auto max-w-full">
           {tabs.map(t => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-3 px-6 py-3 rounded-xl transition-all ${tab === t.id ? 'bg-white/10 text-white shadow-inner' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}
+              className={`flex items-center gap-3 px-6 py-3 rounded-xl transition-all whitespace-nowrap ${tab === t.id ? 'bg-white/10 text-white shadow-inner' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}
             >
               <t.icon size={18} className={tab === t.id ? t.color : 'text-slate-600'} />
               <span className="font-black text-[10px] tracking-widest">{t.label}</span>
@@ -877,7 +962,7 @@ const App = () => {
       </main>
 
       <footer className="mt-24 text-center border-t border-slate-900 pt-12 pb-16">
-        <p className="text-slate-700 font-bold text-[10px] tracking-[0.3em] uppercase">Powered by Gemini 3 Flash & Pro Image Generation</p>
+        <p className="text-slate-700 font-bold text-[10px] tracking-[0.3em] uppercase">Powered by Gemini 3.0 Series & VEO Engine</p>
       </footer>
     </div>
   );
