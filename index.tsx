@@ -141,6 +141,7 @@ const DreamCanvas = () => {
     setError(null);
     setImages([]);
     setMarketingCopy(null);
+    setCurrentStep(0);
     
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -155,28 +156,43 @@ const DreamCanvas = () => {
 
       const finalPrompt = `${styles[marketingStyle]} Subject: ${prompt}. Campaign Goal: ${campaignGoal || 'General promotion'}. Professional commercial grade photography.`;
 
-      const generatedImages: string[] = [];
-      for (let i = 0; i < batchSize; i++) {
-        setCurrentStep(i + 1);
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: { parts: [{ text: finalPrompt }] },
-          config: { imageConfig: { aspectRatio } }
-        });
+      // Parallelize generation for speed
+      let completedCount = 0;
+      const generationPromises = Array.from({ length: batchSize }).map(async (_, i) => {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: { parts: [{ text: `${finalPrompt} --variation ${i+1}` }] },
+            config: { imageConfig: { aspectRatio } }
+          });
 
-        const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
-        if (part) {
-          const base64 = `data:image/png;base64,${part.inlineData.data}`;
-          generatedImages.push(base64);
-          setImages([...generatedImages]);
+          const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+          completedCount++;
+          setCurrentStep(completedCount);
+          
+          if (part) {
+            const base64 = `data:image/png;base64,${part.inlineData.data}`;
+            return base64;
+          }
+          return null;
+        } catch (err: any) {
+          console.error(`Error generating variation ${i+1}:`, err);
+          return null;
         }
+      });
+
+      const results = await Promise.all(generationPromises);
+      const validImages = results.filter((img): img is string => img !== null);
+      
+      if (validImages.length === 0) {
+        throw new Error("No se pudo generar ninguna imagen. Revisa tu cuota de API.");
       }
+
+      setImages(validImages);
       saveToHistory(prompt);
       
-      // Auto-generate copy after images are ready
-      if (generatedImages.length > 0) {
-        generateCopy(generatedImages[0], prompt);
-      }
+      // Auto-generate copy immediately after images are ready
+      generateCopy(validImages[0], prompt);
 
     } catch (err: any) {
       setError({ message: err.message, isQuota: err.message?.includes("429"), isForbidden: err.message?.includes("403") });
@@ -197,7 +213,7 @@ const DreamCanvas = () => {
           {
             parts: [
               { inlineData: { data: base64Data, mimeType: 'image/png' } },
-              { text: `Based on this marketing image and the concept "${originalPrompt}", write a high-converting marketing copy for social media. Include a headline, a short body description with benefits, and a call to action. Use emojis and make it persuasive for the goal: ${campaignGoal || 'Sales'}.` }
+              { text: `Based on this marketing image and the concept "${originalPrompt}", write a high-converting marketing copy for social media. Include a headline, a short body description with benefits, and a call to action. Use emojis and make it persuasive for the goal: ${campaignGoal || 'Sales'}. Response in the same language as the prompt.` }
             ]
           }
         ]
@@ -206,7 +222,7 @@ const DreamCanvas = () => {
       setMarketingCopy(response.text || "No copy generated.");
     } catch (e: any) {
       console.error("Copy generation failed", e);
-      setMarketingCopy("Failed to generate marketing copy.");
+      setMarketingCopy("Fallo al generar el copy de marketing.");
     } finally {
       setCopyLoading(false);
     }
@@ -231,7 +247,7 @@ const DreamCanvas = () => {
           <div>
             <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Brief del Producto</label>
             <textarea 
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white min-h-[80px] focus:ring-1 focus:ring-emerald-500"
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white min-h-[80px] focus:ring-1 focus:ring-emerald-500 transition-all outline-none"
               placeholder="Describe tu producto..."
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
@@ -239,10 +255,10 @@ const DreamCanvas = () => {
           </div>
 
           <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Objetivo (Opcional)</label>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Objetivo Comercial</label>
             <input 
               type="text"
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white focus:ring-1 focus:ring-emerald-500"
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white focus:ring-1 focus:ring-emerald-500 transition-all outline-none"
               placeholder="Ej: Lanzamiento, Rebajas..."
               value={campaignGoal}
               onChange={e => setCampaignGoal(e.target.value)}
@@ -256,7 +272,7 @@ const DreamCanvas = () => {
                 <button 
                   key={s} 
                   onClick={() => setMarketingStyle(s)}
-                  className={`py-2 rounded-lg text-[9px] font-bold border transition-all ${marketingStyle === s ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+                  className={`py-2 rounded-lg text-[9px] font-bold border transition-all ${marketingStyle === s ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600'}`}
                 >
                   {s}
                 </button>
@@ -265,13 +281,13 @@ const DreamCanvas = () => {
           </div>
 
           <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Variaciones: {batchSize}</label>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Cantidad de Imágenes</label>
             <div className="flex gap-1">
               {[1, 2, 3, 4, 5].map(n => (
                 <button 
                   key={n}
                   onClick={() => setBatchSize(n)}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${batchSize === n ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-500'}`}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${batchSize === n ? 'bg-emerald-500 text-white shadow-md' : 'bg-slate-800 text-slate-500 hover:bg-slate-700'}`}
                 >
                   {n}
                 </button>
@@ -282,9 +298,14 @@ const DreamCanvas = () => {
           <button 
             onClick={generateImage}
             disabled={loading || !prompt}
-            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs tracking-widest disabled:opacity-50 transition-all active:scale-95"
+            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs tracking-widest disabled:opacity-50 transition-all active:scale-95 shadow-lg shadow-emerald-900/20"
           >
-            {loading ? <Loader2 className="animate-spin mx-auto" /> : (
+            {loading ? (
+              <div className="flex items-center justify-center gap-3">
+                <Loader2 className="animate-spin" size={18} />
+                <span>PROCESANDO...</span>
+              </div>
+            ) : (
               <div className="flex items-center justify-center gap-2">
                 <TrendingUp size={16} />
                 SINTETIZAR {batchSize > 1 ? `${batchSize} ASSETS` : 'ASSET'}
@@ -304,27 +325,39 @@ const DreamCanvas = () => {
       </div>
 
       <div className="flex flex-col gap-6">
-        <div className="min-h-[400px] glass rounded-3xl border-white/5 p-6 relative overflow-hidden">
+        <div className="min-h-[400px] glass rounded-3xl border-white/5 p-6 relative overflow-hidden transition-all duration-500">
           {loading && (
-            <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-md z-10 flex flex-col items-center justify-center gap-4">
-              <Loader2 className="animate-spin text-emerald-400" size={40} />
-              <p className="text-emerald-400 font-bold text-[10px] uppercase tracking-[0.3em]">Procesando Asset {currentStep}/{batchSize}</p>
+            <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm z-10 flex flex-col items-center justify-center gap-6 animate-in fade-in duration-300">
+              <div className="relative">
+                <div className="w-16 h-16 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
+                <div className="absolute inset-0 flex items-center justify-center font-black text-[10px] text-emerald-400">
+                  {Math.round((currentStep / batchSize) * 100)}%
+                </div>
+              </div>
+              <div className="text-center">
+                <p className="text-emerald-400 font-bold text-[10px] uppercase tracking-[0.3em] mb-1">Generando Lote Inteligente</p>
+                <p className="text-slate-400 text-[9px] font-bold uppercase">{currentStep} de {batchSize} completados</p>
+              </div>
             </div>
           )}
           
           {error && (
-            <div className="p-4 bg-red-950/20 border border-red-900/50 rounded-2xl text-red-400 text-xs mb-4">
-              <AlertCircle className="inline mr-2" size={14} /> {error.message}
-              {error.isForbidden && <button onClick={() => window.aistudio?.openSelectKey()} className="ml-4 underline font-bold">Cambiar Clave</button>}
+            <div className="p-4 bg-red-950/20 border border-red-900/50 rounded-2xl text-red-400 text-xs mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle size={14} /> 
+                <span>{error.message}</span>
+              </div>
+              {error.isForbidden && <button onClick={() => window.aistudio?.openSelectKey()} className="px-3 py-1 bg-red-900/40 rounded-lg underline font-bold">Cambiar Clave</button>}
             </div>
           )}
 
           {images.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {images.map((img, i) => (
-                <div key={i} className="group relative aspect-square rounded-2xl overflow-hidden border border-white/5 bg-slate-900 animate-in zoom-in duration-300">
-                  <img src={img} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
-                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <div key={i} className="group relative aspect-square rounded-2xl overflow-hidden border border-white/5 bg-slate-900 animate-in zoom-in duration-500" style={{ animationDelay: `${i * 100}ms` }}>
+                  <img src={img} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" loading="lazy" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-end justify-between p-4">
+                    <span className="text-[10px] font-black text-white/50">ASSET {i+1}</span>
                     <button 
                       onClick={() => {
                         const link = document.createElement('a');
@@ -332,33 +365,37 @@ const DreamCanvas = () => {
                         link.download = `nexus-marketing-${i}.png`;
                         link.click();
                       }}
-                      className="p-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white shadow-xl transition-all"
+                      className="p-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white shadow-xl transform translate-y-2 group-hover:translate-y-0 transition-all"
                     >
-                      <Download size={20} />
+                      <Download size={18} />
                     </button>
                   </div>
                 </div>
               ))}
             </div>
           ) : !loading && (
-            <div className="h-[400px] flex flex-col items-center justify-center text-slate-800">
-              <ShoppingBag size={64} className="mb-4 opacity-10" />
-              <p className="text-[10px] font-black uppercase tracking-[0.4em] opacity-40">Nexus Studio Ready</p>
+            <div className="h-[400px] flex flex-col items-center justify-center text-slate-800 opacity-20">
+              <div className="p-8 border-2 border-dashed border-slate-700 rounded-[3rem] mb-6">
+                <ShoppingBag size={64} />
+              </div>
+              <p className="text-[10px] font-black uppercase tracking-[0.4em]">Nexus Studio Ready</p>
             </div>
           )}
         </div>
 
         { (marketingCopy || copyLoading) && (
-          <div className="glass p-8 rounded-3xl border-white/5 shadow-2xl animate-in slide-in-from-bottom duration-500">
+          <div className="glass p-8 rounded-3xl border-white/5 shadow-2xl animate-in slide-in-from-bottom duration-700">
             <div className="flex items-center justify-between mb-6">
                <div className="flex items-center gap-3">
-                  <MessageSquare className="text-emerald-400" size={18} />
+                  <div className="w-8 h-8 bg-emerald-500/10 rounded-lg flex items-center justify-center">
+                    <MessageSquare className="text-emerald-400" size={16} />
+                  </div>
                   <h3 className="font-bold text-white uppercase text-xs tracking-widest">IA Marketing Copy</h3>
                </div>
                {marketingCopy && !copyLoading && (
                  <button 
                   onClick={copyToClipboard}
-                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-[10px] font-bold text-slate-300 transition-all"
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-[10px] font-bold text-slate-300 transition-all active:scale-95"
                  >
                    {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
                    {copied ? 'COPIADO' : 'COPIAR TEXTO'}
@@ -369,10 +406,10 @@ const DreamCanvas = () => {
             {copyLoading ? (
               <div className="flex flex-col items-center py-12 gap-4">
                  <Loader2 className="animate-spin text-emerald-400" size={24} />
-                 <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Redactando estrategia...</p>
+                 <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest animate-pulse">Redactando estrategia...</p>
               </div>
             ) : (
-              <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-900/50 p-6 rounded-2xl border border-white/5">
+              <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-900/50 p-6 rounded-2xl border border-white/5 font-medium">
                 {marketingCopy}
               </div>
             )}
@@ -421,7 +458,8 @@ const MotionStudio = () => {
         config: { numberOfVideos: 1, resolution: '1080p', aspectRatio: '16:9' }
       });
       while (!op.done) {
-        await new Promise(r => setTimeout(r, 10000));
+        // Reduced polling interval for faster perceived result
+        await new Promise(r => setTimeout(r, 7000));
         op = await ai.operations.getVideosOperation({ operation: op });
       }
       const link = op.response?.generatedVideos?.[0]?.video?.uri;
@@ -452,14 +490,16 @@ const MotionStudio = () => {
     <div className="grid md:grid-cols-[380px_1fr] gap-8">
       <div className="glass p-6 rounded-3xl h-fit border-white/5 shadow-2xl space-y-6">
         <div className="flex items-center gap-2 mb-4">
-          <Video className="text-pink-400" size={20} />
+          <div className="p-2 bg-pink-500/10 rounded-lg">
+            <Video className="text-pink-400" size={20} />
+          </div>
           <h2 className="font-bold text-white uppercase text-xs tracking-widest">Motion Studio Pro</h2>
         </div>
         
         <div className="space-y-4">
           <label className="text-[10px] font-bold text-slate-500 uppercase block">Concepto de Escena</label>
           <textarea 
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-white min-h-[140px] focus:ring-1 focus:ring-pink-500"
+            className="w-full bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-white min-h-[140px] focus:ring-1 focus:ring-pink-500 outline-none transition-all"
             placeholder="Describe el movimiento, la cámara y el sujeto cinematográfico..."
             value={prompt}
             onChange={e => setPrompt(e.target.value)}
@@ -506,21 +546,29 @@ const MotionStudio = () => {
         )}
       </div>
 
-      <div className="glass rounded-[2rem] min-h-[550px] flex items-center justify-center bg-black overflow-hidden border-white/5 relative shadow-inner">
+      <div className="glass rounded-[2rem] min-h-[550px] flex items-center justify-center bg-black overflow-hidden border-white/5 relative shadow-inner transition-all duration-700">
         {loading && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-6 bg-black/40 backdrop-blur-sm">
-             <div className="w-20 h-20 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin"></div>
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
+             <div className="relative">
+               <div className="w-24 h-24 border-4 border-pink-500/10 border-t-pink-500 rounded-full animate-spin"></div>
+               <div className="absolute inset-0 flex items-center justify-center">
+                  <Video size={24} className="text-pink-500 animate-pulse" />
+               </div>
+             </div>
              <div className="text-center space-y-1">
                 <p className="text-pink-100 font-black text-xs uppercase tracking-[0.3em] animate-pulse">Sintetizando Cinematic...</p>
-                <p className="text-slate-500 text-[9px] font-bold uppercase">Esto puede tomar hasta 1-2 minutos</p>
+                <p className="text-slate-500 text-[9px] font-bold uppercase">Optimizado para alta resolución</p>
              </div>
           </div>
         )}
         
         {error && (
-          <div className="flex flex-col items-center gap-4 text-center max-w-sm px-8">
-            <ShieldAlert size={48} className="text-red-500/50" />
+          <div className="flex flex-col items-center gap-4 text-center max-w-sm px-8 animate-in zoom-in duration-300">
+            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-2">
+              <ShieldAlert size={32} className="text-red-500" />
+            </div>
             <p className="text-red-400 text-sm font-medium leading-relaxed">{error}</p>
+            <button onClick={() => window.aistudio?.openSelectKey()} className="px-6 py-2 bg-slate-800 rounded-xl text-[10px] font-black uppercase text-slate-400 hover:text-white transition-all">Configurar API</button>
           </div>
         )}
 
@@ -528,10 +576,10 @@ const MotionStudio = () => {
           <video src={videoUrl} controls autoPlay loop className="w-full h-full object-cover animate-in fade-in duration-1000" />
         ) : !loading && !error && (
           <div className="text-center space-y-6 group cursor-pointer" onClick={() => document.querySelector('textarea')?.focus()}>
-            <div className="w-20 h-20 bg-slate-900 rounded-[2rem] flex items-center justify-center mx-auto border border-slate-800 group-hover:scale-110 transition-transform duration-500">
-               <Play size={32} className="text-slate-700 group-hover:text-pink-500" fill="currentColor" />
+            <div className="w-24 h-24 bg-slate-900 rounded-[2.5rem] flex items-center justify-center mx-auto border border-slate-800 group-hover:scale-110 group-hover:border-pink-500/30 transition-all duration-500 shadow-2xl">
+               <Play size={40} className="text-slate-800 group-hover:text-pink-500 transition-colors" fill="currentColor" />
             </div>
-            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-700 group-hover:text-slate-500 transition-colors">Esperando Producción</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-800 group-hover:text-slate-500 transition-colors">Esperando Producción</p>
           </div>
         )}
       </div>
@@ -595,38 +643,40 @@ const LiveCompanion = () => {
   return (
     <div className="grid md:grid-cols-[380px_1fr] gap-6">
       <div className="glass p-8 rounded-[2.5rem] flex flex-col items-center justify-center text-center border-white/5 shadow-2xl">
-        <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center mb-6">
-           <Mic className="text-indigo-400" size={24} />
+        <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center mb-6">
+           <Mic className="text-indigo-400" size={28} />
         </div>
         <h2 className="font-bold text-white mb-8 tracking-widest text-xs uppercase">Ventas en Tiempo Real</h2>
         <button 
           onClick={active ? () => { sessionRef.current?.close(); setActive(false); } : start} 
-          className={`w-32 h-32 rounded-full flex items-center justify-center transition-all ${active ? 'bg-indigo-500 animate-pulse shadow-[0_0_50px_rgba(99,102,241,0.3)]' : 'bg-slate-800 hover:bg-slate-700 border border-slate-700'}`}
+          className={`w-36 h-36 rounded-full flex items-center justify-center transition-all duration-500 border-4 ${active ? 'bg-indigo-500 border-indigo-400 shadow-[0_0_60px_rgba(99,102,241,0.4)] scale-105' : 'bg-slate-800 border-slate-700 hover:border-indigo-500/50'}`}
         >
-          {active ? <Volume2 size={40} className="text-white" /> : <Mic size={40} className="text-slate-400" />}
+          {active ? <Volume2 size={48} className="text-white animate-pulse" /> : <Mic size={48} className="text-slate-400" />}
         </button>
         <div className="mt-8 flex flex-col gap-1">
-           <p className="text-[10px] font-black text-indigo-400 tracking-widest uppercase">{active ? 'TRANSMITIENDO' : 'LISTO PARA INTERACTUAR'}</p>
-           {!active && <p className="text-[9px] text-slate-600 font-bold">Usa tu voz para cerrar ventas</p>}
+           <p className={`text-[10px] font-black tracking-widest uppercase transition-colors ${active ? 'text-indigo-400' : 'text-slate-500'}`}>{active ? 'EN LÍNEA / TRANSMITIENDO' : 'LISTO PARA INTERACTUAR'}</p>
+           {!active && <p className="text-[9px] text-slate-600 font-bold">Inicia la voz para cerrar acuerdos</p>}
         </div>
       </div>
       <div className="glass p-8 rounded-[2.5rem] h-[550px] flex flex-col border-white/5 overflow-hidden shadow-2xl">
         <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-800">
-           <MessageSquare size={16} className="text-slate-500" />
-           <span className="text-[10px] font-black text-slate-500 tracking-widest uppercase">Transcripción Inteligente</span>
+           <div className="p-1.5 bg-slate-800 rounded-md">
+            <MessageSquare size={14} className="text-indigo-400" />
+           </div>
+           <span className="text-[10px] font-black text-slate-500 tracking-widest uppercase">Inteligencia de Diálogo</span>
         </div>
         <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scroll">
           {msgs.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
-              <div className={`max-w-[80%] px-5 py-3 rounded-2xl text-[13px] leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-200 border border-slate-700'}`}>
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-4 duration-300`}>
+              <div className={`max-w-[80%] px-5 py-3 rounded-[1.25rem] text-[13px] leading-relaxed shadow-lg ${m.role === 'user' ? 'bg-indigo-600 text-white border border-indigo-500' : 'bg-slate-800/80 text-slate-200 border border-slate-700 backdrop-blur-sm'}`}>
                 {m.text}
               </div>
             </div>
           ))}
           {msgs.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center text-slate-800">
-               <Mic size={48} className="opacity-5 mb-4" />
-               <p className="text-[10px] font-black uppercase tracking-[0.4em] opacity-30">Escuchando sesión...</p>
+            <div className="h-full flex flex-col items-center justify-center text-slate-800 opacity-20">
+               <Mic size={48} className="mb-4" />
+               <p className="text-[10px] font-black uppercase tracking-[0.4em]">Escuchando sesión...</p>
             </div>
           )}
         </div>
@@ -650,7 +700,7 @@ const Vox = () => {
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: text }] }],
         config: {
-          responseModalalities: [Modality.AUDIO],
+          responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
         },
       });
@@ -669,38 +719,50 @@ const Vox = () => {
   };
 
   return (
-    <div className="glass p-12 rounded-[3rem] max-w-4xl mx-auto border-white/5 shadow-2xl space-y-8 relative overflow-hidden">
-      <div className="absolute top-0 right-0 p-12 opacity-5">
-         <Volume2 size={120} />
+    <div className="glass p-12 rounded-[3.5rem] max-w-4xl mx-auto border-white/5 shadow-2xl space-y-8 relative overflow-hidden transition-all duration-700">
+      <div className="absolute top-0 right-0 p-16 opacity-[0.03] pointer-events-none">
+         <Volume2 size={240} />
       </div>
       <div className="flex items-center gap-4 relative z-10">
-        <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center">
-           <Volume2 className="text-amber-400" size={24} />
+        <div className="w-14 h-14 bg-amber-500/10 rounded-2xl flex items-center justify-center shadow-lg">
+           <Volume2 className="text-amber-400" size={28} />
         </div>
-        <h2 className="font-bold text-white text-sm uppercase tracking-[0.2em]">Vox Locución Studio</h2>
+        <div>
+          <h2 className="font-bold text-white text-sm uppercase tracking-[0.25em] mb-1">Vox Locución Pro</h2>
+          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-[0.2em]">Síntesis Neuronal Premium</p>
+        </div>
       </div>
       <div className="space-y-4 relative z-10">
-        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Guion para Locución</label>
+        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Script de Audio</label>
         <textarea 
-          className="w-full bg-slate-900/50 border border-slate-800 rounded-3xl p-8 text-slate-200 text-lg leading-relaxed min-h-[220px] focus:ring-1 focus:ring-amber-500 shadow-inner"
-          placeholder="Escribe el texto que la IA debe leer con voz profesional..."
+          className="w-full bg-slate-900/40 border border-slate-800 rounded-[2.5rem] p-8 text-slate-200 text-lg leading-relaxed min-h-[220px] focus:ring-1 focus:ring-amber-500 shadow-inner outline-none transition-all duration-300"
+          placeholder="Ingresa el texto para vocalizar con la más alta fidelidad..."
           value={text}
           onChange={e => setText(e.target.value)}
         />
       </div>
       <div className="flex flex-col sm:flex-row justify-between items-center gap-6 relative z-10">
         <div className="flex flex-col gap-2">
-           <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Seleccionar Perfil de Voz</label>
-           <select className="bg-slate-800 border border-slate-700 rounded-xl text-xs px-6 py-3 font-bold text-slate-300 focus:outline-none focus:ring-1 focus:ring-amber-500 min-w-[180px]" value={voice} onChange={e => setVoice(e.target.value)}>
+           <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-4">Perfil Vocal Seleccionado</label>
+           <select className="bg-slate-800 border border-slate-700 rounded-2xl text-xs px-8 py-4 font-bold text-slate-300 focus:outline-none focus:ring-1 focus:ring-amber-500 min-w-[220px] shadow-lg hover:border-amber-500/50 transition-all appearance-none cursor-pointer" value={voice} onChange={e => setVoice(e.target.value)}>
             {['Kore', 'Puck', 'Charon', 'Fenrir'].map(v => <option key={v} value={v}>{v}</option>)}
           </select>
         </div>
         <button 
           onClick={speak} 
           disabled={loading || !text || isPlaying} 
-          className="bg-amber-600 hover:bg-amber-500 px-12 py-4 rounded-2xl font-black text-[11px] tracking-[0.2em] text-white transition-all shadow-lg shadow-amber-900/30 active:scale-95 disabled:opacity-50"
+          className="bg-amber-600 hover:bg-amber-500 px-14 py-5 rounded-[1.5rem] font-black text-[11px] tracking-[0.25em] text-white transition-all shadow-xl shadow-amber-900/30 active:scale-95 disabled:opacity-50"
         >
-          {loading ? <Loader2 className="animate-spin mx-auto" /> : isPlaying ? 'REPRODUCIENDO...' : 'EJECUTAR LOCUCIÓN'}
+          {loading ? <Loader2 className="animate-spin" size={18} /> : isPlaying ? (
+            <div className="flex items-center gap-3">
+              <div className="flex gap-1 h-3 items-end">
+                <div className="w-1 bg-white animate-[bounce_0.6s_infinite] h-2"></div>
+                <div className="w-1 bg-white animate-[bounce_0.8s_infinite] h-3"></div>
+                <div className="w-1 bg-white animate-[bounce_0.5s_infinite] h-1.5"></div>
+              </div>
+              REPRODUCIENDO...
+            </div>
+          ) : 'EJECUTAR LOCUCIÓN'}
         </button>
       </div>
     </div>
@@ -718,32 +780,34 @@ const App = () => {
   ];
 
   return (
-    <div className="min-h-screen p-4 md:p-12 max-w-7xl mx-auto">
+    <div className="min-h-screen p-4 md:p-12 max-w-7xl mx-auto flex flex-col">
       <header className="flex flex-col md:flex-row items-center justify-between mb-16 gap-8">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-4 mb-1">
-            <div className="w-12 h-12 bg-indigo-600 rounded-[1.2rem] flex items-center justify-center shadow-lg shadow-indigo-500/30">
-               <Layers className="text-white" size={24} />
+            <div className="w-14 h-14 bg-indigo-600 rounded-[1.4rem] flex items-center justify-center shadow-2xl shadow-indigo-500/40 transform hover:rotate-6 transition-transform cursor-pointer">
+               <Layers className="text-white" size={28} />
             </div>
-            <h1 className="text-5xl font-black tracking-tighter gradient-text">NEXUS.</h1>
+            <div>
+              <h1 className="text-6xl font-black tracking-tighter gradient-text leading-none">NEXUS.</h1>
+              <p className="text-slate-600 font-bold text-[10px] uppercase tracking-[0.6em] ml-1">Advanced Creative Intelligence</p>
+            </div>
           </div>
-          <p className="text-slate-600 font-bold text-[10px] uppercase tracking-[0.5em] ml-1">Advanced Creative Intelligence</p>
         </div>
-        <nav className="glass p-2 rounded-[1.5rem] flex gap-1 shadow-2xl border-white/5 overflow-x-auto max-w-full no-scrollbar">
+        <nav className="glass p-2 rounded-[1.75rem] flex gap-1 shadow-2xl border-white/5 overflow-x-auto max-w-full no-scrollbar">
           {tabs.map(t => (
             <button 
               key={t.id} 
               onClick={() => setTab(t.id)} 
-              className={`flex items-center gap-3 px-8 py-3.5 rounded-[1.1rem] transition-all whitespace-nowrap ${tab === t.id ? 'bg-white/10 text-white shadow-inner' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}
+              className={`flex items-center gap-3 px-8 py-4 rounded-[1.25rem] transition-all whitespace-nowrap group ${tab === t.id ? 'bg-white/10 text-white shadow-inner' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}
             >
-              <t.icon size={18} className={tab === t.id ? t.color : 'text-slate-600'} />
-              <span className="font-black text-[10px] tracking-widest">{t.label}</span>
+              <t.icon size={20} className={`transition-transform duration-500 group-hover:scale-110 ${tab === t.id ? t.color : 'text-slate-600'}`} />
+              <span className="font-black text-[11px] tracking-widest">{t.label}</span>
             </button>
           ))}
         </nav>
       </header>
       
-      <main className="animate-in fade-in slide-in-from-bottom-8 duration-1000">
+      <main className="flex-1 animate-in fade-in slide-in-from-bottom-12 duration-1000">
         {tab === 'images' && <DreamCanvas />}
         {tab === 'video' && <MotionStudio />}
         {tab === 'live' && <LiveCompanion />}
@@ -751,10 +815,13 @@ const App = () => {
       </main>
       
       <footer className="mt-32 text-center border-t border-slate-900 pt-16 pb-20">
-        <div className="flex items-center justify-center gap-8 opacity-20 hover:opacity-40 transition-opacity duration-700">
-           <Zap size={24} />
-           <p className="text-[11px] font-black text-slate-500 tracking-[0.6em] uppercase">Nexus Advanced Studio v4.0 • Enterprise Edition</p>
-           <Zap size={24} />
+        <div className="flex flex-col items-center gap-6 opacity-20 hover:opacity-50 transition-all duration-700">
+           <div className="flex gap-8 items-center">
+             <Zap size={20} />
+             <p className="text-[11px] font-black text-slate-500 tracking-[0.7em] uppercase">Nexus Advanced Studio v5.0 • Enterprise Ultra</p>
+             <Zap size={20} />
+           </div>
+           <div className="text-[9px] font-bold text-slate-700 uppercase tracking-widest">Powered by Google Gemini 3 Technology</div>
         </div>
       </footer>
     </div>
