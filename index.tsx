@@ -38,7 +38,10 @@ import {
   Palette,
   Check,
   Copy,
-  ChevronDown
+  ChevronDown,
+  Upload,
+  Image as ImageIcon,
+  FileText
 } from 'lucide-react';
 
 // --- Utilities ---
@@ -123,6 +126,9 @@ const DreamCanvas = () => {
   const [marketingCopy, setMarketingCopy] = useState<string | null>(null);
   const [copyLoading, setCopyLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [refImage, setRefImage] = useState<{data: string, mimeType: string} | null>(null);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('nexus_dream_history');
@@ -133,6 +139,18 @@ const DreamCanvas = () => {
     const newHistory = [p, ...history.filter(h => h !== p)].slice(0, 10);
     setHistory(newHistory);
     localStorage.setItem('nexus_dream_history', JSON.stringify(newHistory));
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = (reader.result as string).split(',')[1];
+        setRefImage({ data: base64Data, mimeType: file.type });
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const generateImage = async () => {
@@ -160,9 +178,20 @@ const DreamCanvas = () => {
       let completedCount = 0;
       const generationPromises = Array.from({ length: batchSize }).map(async (_, i) => {
         try {
+          const parts: any[] = [{ text: `${finalPrompt} --variation ${i+1}` }];
+          
+          if (refImage) {
+            parts.unshift({
+              inlineData: {
+                data: refImage.data,
+                mimeType: refImage.mimeType
+              }
+            });
+          }
+
           const response = await ai.models.generateContent({
             model: modelName,
-            contents: { parts: [{ text: `${finalPrompt} --variation ${i+1}` }] },
+            contents: { parts },
             config: { imageConfig: { aspectRatio } }
           });
 
@@ -252,6 +281,40 @@ const DreamCanvas = () => {
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
             />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Imagen de Referencia (Opcional)</label>
+            <div 
+              onClick={() => fileInputRef.current?.click()}
+              className={`w-full border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${refImage ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}
+            >
+              {refImage ? (
+                <div className="relative w-full aspect-video rounded-lg overflow-hidden group">
+                  <img src={`data:${refImage.mimeType};base64,${refImage.data}`} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setRefImage(null); }}
+                      className="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/40 transition-all"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <Upload size={20} className="text-slate-600 mb-2" />
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Subir Referencia</span>
+                </>
+              )}
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleImageUpload} 
+                className="hidden" 
+                accept="image/*" 
+              />
+            </div>
           </div>
 
           <div>
