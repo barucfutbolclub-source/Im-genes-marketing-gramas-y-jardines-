@@ -40,8 +40,17 @@ import {
   Copy,
   ChevronDown,
   Upload,
-  Image as ImageIcon,
-  FileText
+  ImageIcon,
+  FileText,
+  Instagram,
+  Facebook,
+  Linkedin,
+  Mail,
+  Search,
+  Globe,
+  Monitor,
+  Smartphone,
+  Cpu
 } from 'lucide-react';
 
 // --- Utilities ---
@@ -67,6 +76,34 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
     for (let i = 0; i < frameCount; i++) channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
   }
   return buffer;
+}
+
+// Utility to wrap raw PCM in a WAV container for downloading
+function createWavBlob(pcmData: Uint8Array, sampleRate: number = 24000) {
+  const header = new ArrayBuffer(44);
+  const view = new DataView(header);
+  
+  const writeString = (offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 32 + pcmData.length, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // Byte rate
+  view.setUint16(32, 2, true); // Block align
+  view.setUint16(34, 16, true); // Bits per sample
+  writeString(36, 'data');
+  view.setUint32(40, pcmData.length, true);
+
+  return new Blob([header, pcmData], { type: 'audio/wav' });
 }
 
 // --- Shared Components ---
@@ -118,6 +155,7 @@ const DreamCanvas = () => {
   const [marketingStyle, setMarketingStyle] = useState('Luxury Studio');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [batchSize, setBatchSize] = useState(1);
+  const [quality, setQuality] = useState<'Standard' | 'High'>('Standard');
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
@@ -127,7 +165,16 @@ const DreamCanvas = () => {
   const [copyLoading, setCopyLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [refImage, setRefImage] = useState<{data: string, mimeType: string} | null>(null);
+  const [selectedChannels, setSelectedChannels] = useState<string[]>(['Social Media']);
   
+  const channels = [
+    { id: 'Social Media', label: 'Social Ads', icon: Instagram },
+    { id: 'LinkedIn B2B', label: 'LinkedIn', icon: Linkedin },
+    { id: 'Email Marketing', label: 'Email', icon: Mail },
+    { id: 'SEO/SEM', label: 'Búsqueda', icon: Search },
+    { id: 'Web/Landing', label: 'Web/Content', icon: Globe }
+  ];
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -153,6 +200,26 @@ const DreamCanvas = () => {
     }
   };
 
+  const toggleChannel = (id: string) => {
+    setSelectedChannels(prev => 
+      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+    );
+  };
+
+  const handleHighQualitySelect = async () => {
+    if (quality === 'High') {
+      setQuality('Standard');
+      return;
+    }
+    
+    // Check if user has selected a paid key for Pro quality
+    const hasKey = await window.aistudio.hasSelectedApiKey();
+    if (!hasKey) {
+      await window.aistudio.openSelectKey();
+    }
+    setQuality('High');
+  };
+
   const generateImage = async () => {
     if (!prompt.trim()) return;
     setLoading(true);
@@ -163,7 +230,8 @@ const DreamCanvas = () => {
     
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      let modelName = 'gemini-2.5-flash-image';
+      // gemini-2.5-flash-image for standard, gemini-3-pro-image-preview for high
+      const modelName = quality === 'High' ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
       
       const styles: Record<string, string> = {
         'Luxury Studio': 'High-end luxury commercial photography, cinematic lighting, sharp focus, 8k.',
@@ -189,10 +257,15 @@ const DreamCanvas = () => {
             });
           }
 
+          const config: any = { imageConfig: { aspectRatio } };
+          if (quality === 'High') {
+            config.imageConfig.imageSize = "2K"; // Use 2K for high quality pro model
+          }
+
           const response = await ai.models.generateContent({
             model: modelName,
             contents: { parts },
-            config: { imageConfig: { aspectRatio } }
+            config: config
           });
 
           const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
@@ -236,13 +309,19 @@ const DreamCanvas = () => {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const base64Data = imageBuffer.split(',')[1];
       
+      const channelsText = selectedChannels.join(', ');
+      
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: [
           {
             parts: [
               { inlineData: { data: base64Data, mimeType: 'image/png' } },
-              { text: `Based on this marketing image and the concept "${originalPrompt}", write a high-converting marketing copy for social media. Include a headline, a short body description with benefits, and a call to action. Use emojis and make it persuasive for the goal: ${campaignGoal || 'Sales'}. Response in the same language as the prompt.` }
+              { text: `Based on this marketing image and the concept "${originalPrompt}", provide a comprehensive marketing plan including selected channels and concrete tactics for: ${channelsText}. 
+              For EACH channel, write high-converting copy (headlines, body, hashtags) and specific action items (tactics). 
+              Goal: ${campaignGoal || 'Sales and awareness'}. 
+              Language: Match the input prompt language (Spanish). 
+              Format: Use clear headings for each channel.` }
             ]
           }
         ]
@@ -274,17 +353,17 @@ const DreamCanvas = () => {
         
         <div className="space-y-4">
           <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Brief del Producto</label>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">1. Brief del Producto</label>
             <textarea 
               className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white min-h-[80px] focus:ring-1 focus:ring-emerald-500 transition-all outline-none"
-              placeholder="Describe tu producto..."
+              placeholder="Describe tu producto o servicio..."
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
             />
           </div>
 
           <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Imagen de Referencia (Opcional)</label>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">2. Referencia Visual (Opcional)</label>
             <div 
               onClick={() => fileInputRef.current?.click()}
               className={`w-full border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${refImage ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}
@@ -304,7 +383,7 @@ const DreamCanvas = () => {
               ) : (
                 <>
                   <Upload size={20} className="text-slate-600 mb-2" />
-                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Subir Referencia</span>
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Añadir Guía Visual</span>
                 </>
               )}
               <input 
@@ -318,33 +397,70 @@ const DreamCanvas = () => {
           </div>
 
           <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Objetivo Comercial</label>
-            <input 
-              type="text"
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white focus:ring-1 focus:ring-emerald-500 transition-all outline-none"
-              placeholder="Ej: Lanzamiento, Rebajas..."
-              value={campaignGoal}
-              onChange={e => setCampaignGoal(e.target.value)}
-            />
-          </div>
-          
-          <div className="space-y-2">
-             <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Estilo Visual</label>
-             <div className="grid grid-cols-2 gap-2">
-              {['Luxury Studio', 'Minimalist', 'Vibrant Tech', 'Urban Lifestyle'].map(s => (
-                <button 
-                  key={s} 
-                  onClick={() => setMarketingStyle(s)}
-                  className={`py-2 rounded-lg text-[9px] font-bold border transition-all ${marketingStyle === s ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600'}`}
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">3. Canales y Tácticas</label>
+            <div className="grid grid-cols-5 gap-2">
+              {channels.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => toggleChannel(c.id)}
+                  title={c.label}
+                  className={`p-3 rounded-xl border transition-all flex flex-col items-center gap-1 group ${selectedChannels.includes(c.id) ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600'}`}
                 >
-                  {s}
+                  <c.icon size={16} className={selectedChannels.includes(c.id) ? 'text-white' : 'group-hover:text-emerald-400'} />
                 </button>
               ))}
             </div>
           </div>
 
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">4. Calidad de Imagen</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button 
+                onClick={() => setQuality('Standard')}
+                className={`py-2 rounded-xl border flex items-center justify-center gap-2 text-[10px] font-bold transition-all ${quality === 'Standard' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+              >
+                Standard
+              </button>
+              <button 
+                onClick={handleHighQualitySelect}
+                className={`py-2 rounded-xl border flex items-center justify-center gap-2 text-[10px] font-bold transition-all ${quality === 'High' ? 'bg-amber-600 border-amber-500 text-white shadow-[0_0_15px_rgba(217,119,6,0.3)]' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+              >
+                <Award size={14} className={quality === 'High' ? 'text-white' : 'text-amber-500'} /> High Pro
+              </button>
+            </div>
+            {quality === 'High' && (
+              <p className="text-[8px] text-slate-500 mt-2 flex items-center gap-1">
+                <ShieldAlert size={10} className="text-amber-500" /> Requiere API Key de pago para Gemini 3 Pro.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">5. Objetivo y Estilo</label>
+            <div className="space-y-3">
+              <input 
+                type="text"
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white focus:ring-1 focus:ring-emerald-500 transition-all outline-none"
+                placeholder="Ej: Lanzamiento, Rebajas..."
+                value={campaignGoal}
+                onChange={e => setCampaignGoal(e.target.value)}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                {['Luxury Studio', 'Minimalist', 'Vibrant Tech', 'Urban Lifestyle'].map(s => (
+                  <button 
+                    key={s} 
+                    onClick={() => setMarketingStyle(s)}
+                    className={`py-2 rounded-lg text-[9px] font-bold border transition-all ${marketingStyle === s ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600'}`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Cantidad de Imágenes</label>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">Variaciones: {batchSize}</label>
             <div className="flex gap-1">
               {[1, 2, 3, 4, 5].map(n => (
                 <button 
@@ -366,12 +482,12 @@ const DreamCanvas = () => {
             {loading ? (
               <div className="flex items-center justify-center gap-3">
                 <Loader2 className="animate-spin" size={18} />
-                <span>PROCESANDO...</span>
+                <span>EJECUTANDO ESTRATEGIA...</span>
               </div>
             ) : (
               <div className="flex items-center justify-center gap-2">
                 <TrendingUp size={16} />
-                SINTETIZAR {batchSize > 1 ? `${batchSize} ASSETS` : 'ASSET'}
+                DESPLEGAR CAMPAÑA
               </div>
             )}
           </button>
@@ -410,7 +526,7 @@ const DreamCanvas = () => {
                 <AlertCircle size={14} /> 
                 <span>{error.message}</span>
               </div>
-              {error.isForbidden && <button onClick={() => window.aistudio?.openSelectKey()} className="px-3 py-1 bg-red-900/40 rounded-lg underline font-bold">Cambiar Clave</button>}
+              {(error.isForbidden || error.message.includes("not found")) && <button onClick={() => window.aistudio?.openSelectKey()} className="px-3 py-1 bg-red-900/40 rounded-lg underline font-bold text-[10px]">Cambiar Clave</button>}
             </div>
           )}
 
@@ -451,9 +567,9 @@ const DreamCanvas = () => {
             <div className="flex items-center justify-between mb-6">
                <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-emerald-500/10 rounded-lg flex items-center justify-center">
-                    <MessageSquare className="text-emerald-400" size={16} />
+                    <Target className="text-emerald-400" size={16} />
                   </div>
-                  <h3 className="font-bold text-white uppercase text-xs tracking-widest">IA Marketing Copy</h3>
+                  <h3 className="font-bold text-white uppercase text-xs tracking-widest">Plan de Canales y Copy IA</h3>
                </div>
                {marketingCopy && !copyLoading && (
                  <button 
@@ -461,7 +577,7 @@ const DreamCanvas = () => {
                   className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-[10px] font-bold text-slate-300 transition-all active:scale-95"
                  >
                    {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                   {copied ? 'COPIADO' : 'COPIAR TEXTO'}
+                   {copied ? 'COPIADO' : 'COPIAR PLAN'}
                  </button>
                )}
             </div>
@@ -469,10 +585,10 @@ const DreamCanvas = () => {
             {copyLoading ? (
               <div className="flex flex-col items-center py-12 gap-4">
                  <Loader2 className="animate-spin text-emerald-400" size={24} />
-                 <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest animate-pulse">Redactando estrategia...</p>
+                 <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest animate-pulse">Orquestando Tácticas...</p>
               </div>
             ) : (
-              <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-900/50 p-6 rounded-2xl border border-white/5 font-medium">
+              <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-900/50 p-6 rounded-2xl border border-white/5 font-medium prose prose-invert max-w-none">
                 {marketingCopy}
               </div>
             )}
@@ -495,6 +611,10 @@ const MotionStudio = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [videoHistory, setVideoHistory] = useState<VideoHistoryItem[]>([]);
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
+  const [refImage, setRefImage] = useState<{data: string, mimeType: string} | null>(null);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('nexus_motion_history_v2');
@@ -508,30 +628,60 @@ const MotionStudio = () => {
     localStorage.setItem('nexus_motion_history_v2', JSON.stringify(newHistory));
   };
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = (reader.result as string).split(',')[1];
+        setRefImage({ data: base64Data, mimeType: file.type });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const generateVideo = async () => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() && !refImage) return;
     setLoading(true);
     setError(null);
     setVideoUrl(null);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      let op = await ai.models.generateVideos({
+      
+      const generationParams: any = {
         model: 'veo-3.1-fast-generate-preview',
-        prompt: prompt,
-        config: { numberOfVideos: 1, resolution: '1080p', aspectRatio: '16:9' }
-      });
+        config: { 
+          numberOfVideos: 1, 
+          resolution: '1080p', 
+          aspectRatio: aspectRatio 
+        }
+      };
+
+      if (prompt.trim()) {
+        generationParams.prompt = prompt;
+      }
+
+      if (refImage) {
+        generationParams.image = {
+          imageBytes: refImage.data,
+          mimeType: refImage.mimeType
+        };
+      }
+
+      let op = await ai.models.generateVideos(generationParams);
+
       while (!op.done) {
-        // Reduced polling interval for faster perceived result
         await new Promise(r => setTimeout(r, 7000));
         op = await ai.operations.getVideosOperation({ operation: op });
       }
+      
       const link = op.response?.generatedVideos?.[0]?.video?.uri;
       if (link) {
         const res = await fetch(`${link}&key=${process.env.API_KEY}`);
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         setVideoUrl(url);
-        saveToVideoHistory(prompt, url);
+        saveToVideoHistory(prompt || "Imagen Animada", url);
       }
     } catch (e: any) {
       setError(e.message?.includes("403") ? "Error de Permisos: Veo requiere clave Paid activa en tu proyecto." : e.message);
@@ -560,16 +710,71 @@ const MotionStudio = () => {
         </div>
         
         <div className="space-y-4">
-          <label className="text-[10px] font-bold text-slate-500 uppercase block">Concepto de Escena</label>
-          <textarea 
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-white min-h-[140px] focus:ring-1 focus:ring-pink-500 outline-none transition-all"
-            placeholder="Describe el movimiento, la cámara y el sujeto cinematográfico..."
-            value={prompt}
-            onChange={e => setPrompt(e.target.value)}
-          />
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-2 tracking-widest">Instrucciones de Movimiento</label>
+            <textarea 
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-white min-h-[120px] focus:ring-1 focus:ring-pink-500 outline-none transition-all"
+              placeholder="Describe el movimiento, la cámara y el sujeto cinematográfico..."
+              value={prompt}
+              onChange={e => setPrompt(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-2 tracking-widest">Imagen Base (Animar Foto)</label>
+            <div 
+              onClick={() => fileInputRef.current?.click()}
+              className={`w-full border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${refImage ? 'border-pink-500/50 bg-pink-500/5' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}
+            >
+              {refImage ? (
+                <div className="relative w-full aspect-video rounded-lg overflow-hidden group">
+                  <img src={`data:${refImage.mimeType};base64,${refImage.data}`} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setRefImage(null); }}
+                      className="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/40 transition-all"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <ImageIcon size={20} className="text-slate-600 mb-2" />
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Cargar para Animar</span>
+                </>
+              )}
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleImageUpload} 
+                className="hidden" 
+                accept="image/*" 
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-2 tracking-widest">Formato de Salida</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button 
+                onClick={() => setAspectRatio('16:9')}
+                className={`py-2 rounded-xl border flex items-center justify-center gap-2 text-[10px] font-bold transition-all ${aspectRatio === '16:9' ? 'bg-pink-600 border-pink-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+              >
+                <Monitor size={14} /> 16:9 Landscape
+              </button>
+              <button 
+                onClick={() => setAspectRatio('9:16')}
+                className={`py-2 rounded-xl border flex items-center justify-center gap-2 text-[10px] font-bold transition-all ${aspectRatio === '9:16' ? 'bg-pink-600 border-pink-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+              >
+                <Smartphone size={14} /> 9:16 Portrait
+              </button>
+            </div>
+          </div>
+
           <button 
             onClick={generateVideo} 
-            disabled={loading || !prompt} 
+            disabled={loading || (!prompt && !refImage)} 
             className="w-full py-4 bg-pink-600 hover:bg-pink-500 text-white rounded-2xl font-black text-[11px] tracking-widest transition-all active:scale-95 shadow-lg shadow-pink-900/20"
           >
             {loading ? <Loader2 className="animate-spin mx-auto" /> : (
@@ -693,7 +898,7 @@ const LiveCompanion = () => {
           onclose: () => setActive(false)
         },
         config: {
-          responseModalities: [Modality.AUDIO],
+          responseModalalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
           inputAudioTranscription: {},
           outputAudioTranscription: {}
@@ -753,10 +958,12 @@ const Vox = () => {
   const [loading, setLoading] = useState(false);
   const [voice, setVoice] = useState('Kore');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
   const speak = async () => {
     if (!text.trim()) return;
     setLoading(true);
+    setDownloadUrl(null);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const res = await ai.models.generateContent({
@@ -769,8 +976,14 @@ const Vox = () => {
       });
       const data = res.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
       if (data) {
+        const rawBytes = decode(data);
         const ctx = new AudioContext({ sampleRate: 24000 });
-        const buf = await decodeAudioData(decode(data), ctx, 24000, 1);
+        const buf = await decodeAudioData(rawBytes, ctx, 24000, 1);
+        
+        // Generate download URL
+        const wavBlob = createWavBlob(rawBytes, 24000);
+        setDownloadUrl(URL.createObjectURL(wavBlob));
+        
         const s = ctx.createBufferSource();
         s.buffer = buf; 
         s.connect(ctx.destination); 
@@ -805,11 +1018,24 @@ const Vox = () => {
         />
       </div>
       <div className="flex flex-col sm:flex-row justify-between items-center gap-6 relative z-10">
-        <div className="flex flex-col gap-2">
-           <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-4">Perfil Vocal Seleccionado</label>
-           <select className="bg-slate-800 border border-slate-700 rounded-2xl text-xs px-8 py-4 font-bold text-slate-300 focus:outline-none focus:ring-1 focus:ring-amber-500 min-w-[220px] shadow-lg hover:border-amber-500/50 transition-all appearance-none cursor-pointer" value={voice} onChange={e => setVoice(e.target.value)}>
-            {['Kore', 'Puck', 'Charon', 'Fenrir'].map(v => <option key={v} value={v}>{v}</option>)}
-          </select>
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col gap-2">
+             <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-4">Perfil Vocal Seleccionado</label>
+             <select className="bg-slate-800 border border-slate-700 rounded-2xl text-xs px-8 py-4 font-bold text-slate-300 focus:outline-none focus:ring-1 focus:ring-amber-500 min-w-[220px] shadow-lg hover:border-amber-500/50 transition-all appearance-none cursor-pointer" value={voice} onChange={e => setVoice(e.target.value)}>
+              {['Kore', 'Puck', 'Charon', 'Fenrir'].map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          {downloadUrl && (
+            <a 
+              href={downloadUrl} 
+              download={`nexus-vox-${Date.now()}.wav`}
+              className="mt-5 p-4 bg-slate-800/80 hover:bg-slate-700 text-amber-400 rounded-2xl border border-amber-500/20 transition-all flex items-center gap-2 group shadow-lg"
+              title="Guardar Audio"
+            >
+              <Download size={20} className="group-hover:scale-110 transition-transform" />
+              <span className="text-[10px] font-black uppercase tracking-widest">GUARDAR</span>
+            </a>
+          )}
         </div>
         <button 
           onClick={speak} 
