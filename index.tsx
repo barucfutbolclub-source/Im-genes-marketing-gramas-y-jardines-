@@ -61,7 +61,10 @@ import {
   Lightbulb,
   Building,
   Box,
-  BarChart3
+  BarChart3,
+  Database,
+  ArrowRightLeft,
+  Wand2
 } from 'lucide-react';
 
 // --- Utilities ---
@@ -230,6 +233,9 @@ const EntryGate = ({ onUnlock }: { onUnlock: () => void }) => {
 // --- Features ---
 const DreamCanvas = () => {
   const [prompt, setPrompt] = useState('');
+  const [researchInsight, setResearchInsight] = useState('');
+  const [parallelBrief, setParallelBrief] = useState('');
+  const [refining, setRefining] = useState(false);
   const [campaignGoal, setCampaignGoal] = useState('');
   const [marketingStyle, setMarketingStyle] = useState('Luxury Studio');
   const [aspectRatio, setAspectRatio] = useState('1:1');
@@ -246,6 +252,7 @@ const DreamCanvas = () => {
   const [selectedChannels, setSelectedChannels] = useState<string[]>(['Social Media']);
   const [socialLaunch, setSocialLaunch] = useState<{content: string, caption: string} | null>(null);
   const [selectedBriefType, setSelectedBriefType] = useState('Publicitario');
+  const [showParallel, setShowParallel] = useState(false);
   
   const briefTypes = [
     { id: 'Publicitario', label: 'Publicitario', icon: Target, example: 'Lanzamiento de una nueva bebida energética dirigida a gamers de 18-25 años. Mensaje: "Energía infinita para tus sesiones nocturnas". Estilo neón y dinámico.' },
@@ -253,7 +260,7 @@ const DreamCanvas = () => {
     { id: 'Creativo', label: 'Creativo', icon: Lightbulb, example: 'Rediseño visual para cafetería artesanal. Tono cálido, rústico pero moderno. Uso de texturas de madera, colores tierra y ambiente acogedor.' },
     { id: 'Empresa', label: 'Empresa', icon: Building, example: 'Startup tecnológica de IA para agricultura. Valores: Innovación y respeto ambiental. Historia: Fundada por agrónomos en 2023. Identidad minimalista.' },
     { id: 'Producto', label: 'Producto', icon: Box, example: 'Auriculares con cancelación de ruido activa. Batería de 50h, diseño plegable. Beneficio: Aislamiento total en entornos urbanos ruidosos.' },
-    { id: 'Investigación', label: 'Investigación', icon: BarChart3, example: 'Estudio sobre consumo de café en oficinas. El 70% prefiere café de especialidad. Insight: Insatisfacción actual con máquinas automáticas.' }
+    { id: 'Investigación', label: 'Investigación', icon: BarChart3, example: 'Estudio sobre consumo de café en oficinas. El 70% prefiere café de especialidad.', insightExample: 'Insight: Los usuarios asocian el café de especialidad con un aumento del 40% en su claridad mental durante reuniones matutinas. Visualizar este beneficio psicológico.' }
   ];
 
   const channels = [
@@ -277,8 +284,45 @@ const DreamCanvas = () => {
   };
 
   const loadExample = () => {
-    const example = briefTypes.find(b => b.id === selectedBriefType)?.example;
-    if (example) setPrompt(example);
+    const brief = briefTypes.find(b => b.id === selectedBriefType);
+    if (brief) {
+      setPrompt(brief.example);
+      if (brief.id === 'Investigación' && brief.insightExample) {
+        setResearchInsight(brief.insightExample);
+      } else {
+        setResearchInsight('');
+      }
+      setParallelBrief('');
+      setShowParallel(false);
+    }
+  };
+
+  const refineBriefWithAI = async () => {
+    if (!prompt.trim()) return;
+    setRefining(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Actúa como un estratega creativo senior. Refina este brief de tipo "${selectedBriefType}" para que sea más profesional, preciso y efectivo para una IA generativa de imágenes. Estructura la respuesta con objetivos claros, tono de marca y descripción visual detallada.
+        
+        Brief Original: ${prompt}
+        ${selectedBriefType === 'Investigación' ? `Insight Clave: ${researchInsight}` : ''}
+        
+        Retorna exclusivamente el texto del brief refinado en español, listo para ser procesado.`
+      });
+      setParallelBrief(response.text || "");
+      setShowParallel(true);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setRefining(false);
+    }
+  };
+
+  const applyParallelBrief = () => {
+    setPrompt(parallelBrief);
+    setShowParallel(false);
   };
 
   const generateImage = async () => {
@@ -293,7 +337,13 @@ const DreamCanvas = () => {
         'Vibrant Tech': 'Cyberpunk neon, sharp reflections, high contrast, digital futuristic.',
         'Urban Lifestyle': 'Natural sunlight, authentic urban setting, shallow depth of field.'
       };
-      const finalPrompt = `Brief Type: ${selectedBriefType}. Context: ${prompt}. Marketing Style: ${styles[marketingStyle]}. Campaign Goal: ${campaignGoal || 'General promotion'}. Professional commercial grade photography.`;
+      
+      let typeSpecificContext = `Brief Type: ${selectedBriefType}. Context: ${prompt}.`;
+      if (selectedBriefType === 'Investigación' && researchInsight) {
+        typeSpecificContext += ` KEY RESEARCH INSIGHT: ${researchInsight}. Transform this data into a conceptual visual metaphor.`;
+      }
+
+      const finalPrompt = `${typeSpecificContext} Marketing Style: ${styles[marketingStyle]}. Campaign Goal: ${campaignGoal || 'General promotion'}. Professional commercial grade photography.`;
 
       let completedCount = 0;
       const generationPromises = Array.from({ length: batchSize }).map(async (_, i) => {
@@ -328,7 +378,10 @@ const DreamCanvas = () => {
         contents: [
           { parts: [
               { inlineData: { data: base64Data, mimeType: 'image/png' } },
-              { text: `Based on a ${selectedBriefType} brief, create a high-converting post caption in Spanish for this asset: ${originalPrompt}. Focus on ${channelsText}. Include hashtags.` }
+              { text: `Based on a ${selectedBriefType} brief, create a high-converting post caption in Spanish for this asset. 
+              Brief description: ${originalPrompt}. 
+              ${selectedBriefType === 'Investigación' ? `Data Insight to include: ${researchInsight}` : ''}
+              Focus on ${channelsText}. Include hashtags and a strong CTA.` }
             ] }
         ]
       });
@@ -339,12 +392,13 @@ const DreamCanvas = () => {
   return (
     <div className="grid lg:grid-cols-[380px_1fr] gap-8">
       {socialLaunch && <SocialLaunchOverlay content={socialLaunch.content} caption={socialLaunch.caption} onClose={() => setSocialLaunch(null)} />}
+      
       <div className="glass p-6 rounded-3xl h-fit border-white/5 shadow-2xl space-y-6">
         <div className="flex items-center gap-3 mb-4"><ShoppingBag className="text-emerald-400" size={20} /><h2 className="font-bold text-white uppercase tracking-widest text-sm">Brief Studio</h2></div>
         
         <div className="space-y-4">
           <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-3 block tracking-[0.1em]">Tipo de Arquitectura</label>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-3 block tracking-[0.1em]">Arquitectura Estratégica</label>
             <div className="grid grid-cols-3 gap-2">
               {briefTypes.map(b => (
                 <button
@@ -359,39 +413,67 @@ const DreamCanvas = () => {
             </div>
           </div>
 
-          <div>
+          <div className="relative group">
             <div className="flex justify-between items-center mb-2">
-               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.1em]">Instrucciones del Brief</label>
-               <button onClick={loadExample} className="text-[9px] font-black text-indigo-400 hover:text-indigo-300 flex items-center gap-1 uppercase tracking-tighter transition-colors">✨ Cargar Ejemplo</button>
+               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.1em]">Descripción del Brief</label>
+               <div className="flex gap-3">
+                  <button onClick={loadExample} className="text-[9px] font-black text-indigo-400 hover:text-indigo-300 flex items-center gap-1 uppercase tracking-tighter transition-colors">✨ Cargar Ejemplo</button>
+               </div>
             </div>
             <textarea 
               className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white min-h-[100px] outline-none focus:ring-1 focus:ring-indigo-500 transition-all" 
-              placeholder={`Escribe o carga un ejemplo de brief ${selectedBriefType.toLowerCase()}...`}
+              placeholder={`Define el contexto ${selectedBriefType.toLowerCase()}...`}
               value={prompt} 
               onChange={e => setPrompt(e.target.value)} 
             />
+            <button 
+              onClick={refineBriefWithAI}
+              disabled={refining || !prompt}
+              className="absolute bottom-3 right-3 p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shadow-xl shadow-indigo-900/40 transition-all active:scale-90 disabled:opacity-50 disabled:grayscale"
+              title="Optimizar Brief con IA"
+            >
+              {refining ? <Loader2 className="animate-spin" size={16} /> : <Wand2 size={16} />}
+            </button>
           </div>
+
+          {showParallel && (
+            <div className="animate-in zoom-in slide-in-from-top-4 duration-500 border border-indigo-500/30 bg-indigo-500/5 rounded-2xl p-4 space-y-3 shadow-2xl shadow-indigo-500/10">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={14} className="text-indigo-400" />
+                  <span className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">Nexus Parallel Brief</span>
+                </div>
+                <button onClick={() => setShowParallel(false)} className="text-slate-500 hover:text-white"><X size={14} /></button>
+              </div>
+              <p className="text-[11px] text-slate-300 italic leading-relaxed line-clamp-4">{parallelBrief}</p>
+              <button 
+                onClick={applyParallelBrief}
+                className="w-full py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest border border-indigo-500/30 transition-all"
+              >
+                Aplicar Mejor Versión
+              </button>
+            </div>
+          )}
+
+          {selectedBriefType === 'Investigación' && (
+            <div className="animate-in slide-in-from-top-2 duration-300">
+               <label className="text-[10px] font-bold text-amber-500/80 uppercase mb-2 block tracking-[0.1em] flex items-center gap-2">
+                 <Database size={12} /> Insight de Investigación (Key Data)
+               </label>
+               <textarea 
+                 className="w-full bg-slate-900 border border-amber-500/10 rounded-xl p-3 text-xs text-amber-100 min-h-[60px] outline-none focus:ring-1 focus:ring-amber-500/30 transition-all placeholder:text-slate-700" 
+                 placeholder="¿Qué dato clave quieres visualizar?"
+                 value={researchInsight} 
+                 onChange={e => setResearchInsight(e.target.value)} 
+               />
+            </div>
+          )}
 
           <div>
             <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">Referencia Visual</label>
             <div onClick={() => fileInputRef.current?.click()} className={`w-full border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer ${refImage ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700 transition-colors'}`}>
-              {refImage ? <img src={`data:${refImage.mimeType};base64,${refImage.data}`} className="w-full aspect-video object-cover rounded-lg" /> : <><Upload size={18} className="text-slate-600 mb-2" /><span className="text-[9px] font-bold text-slate-500 uppercase">Añadir Guía</span></>}
+              {refImage ? <img src={`data:${refImage.mimeType};base64,${refImage.data}`} className="w-full aspect-video object-cover rounded-lg" /> : <><Upload size={18} className="text-slate-600 mb-2" /><span className="text-[9px] font-bold text-slate-500 uppercase">Guía de Composición</span></>}
               <input type="file" ref={fileInputRef} onChange={e => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = () => setRefImage({ data: (r.result as string).split(',')[1], mimeType: f.type }); r.readAsDataURL(f); } }} className="hidden" accept="image/*" />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">Estilo Visual</label>
-            <div className="grid grid-cols-2 gap-2">
-              {['Luxury Studio', 'Minimalist', 'Vibrant Tech', 'Urban Lifestyle'].map(s => (
-                <button 
-                  key={s} 
-                  onClick={() => setMarketingStyle(s)} 
-                  className={`py-2 rounded-lg text-[9px] font-black border transition-all uppercase ${marketingStyle === s ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
-                >
-                  {s}
-                </button>
-              ))}
             </div>
           </div>
 
@@ -422,13 +504,13 @@ const DreamCanvas = () => {
               <div className="p-10 border-2 border-dashed border-slate-800 rounded-[3rem] mb-6">
                 <ShoppingBag size={80} />
               </div>
-              <p className="text-[10px] font-black uppercase tracking-[0.5em]">Esperando Directrices Estratégicas</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.5em]">Esperando Directriz Creativa</p>
             </div>
           )}
           {loading && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/40 backdrop-blur-sm animate-in fade-in">
               <div className="w-20 h-20 border-4 border-indigo-500/10 border-t-indigo-500 rounded-full animate-spin mb-6"></div>
-              <p className="text-white font-black text-xs uppercase tracking-[0.3em] animate-pulse">Sintetizando Lote Creativo...</p>
+              <p className="text-white font-black text-xs uppercase tracking-[0.3em] animate-pulse">Sintetizando activos...</p>
               <p className="text-slate-500 text-[9px] mt-2 font-bold uppercase tracking-widest">{currentStep} de {batchSize} completados</p>
             </div>
           )}
@@ -440,8 +522,8 @@ const DreamCanvas = () => {
                <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center shadow-lg"><Target className="text-indigo-400" size={18} /></div>
                   <div>
-                    <h3 className="font-black text-white uppercase text-xs tracking-widest">Plan de Captions IA</h3>
-                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Optimizado para {selectedBriefType}</p>
+                    <h3 className="font-black text-white uppercase text-xs tracking-widest">Plan de Social Media</h3>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Estrategia para {selectedBriefType}</p>
                   </div>
                </div>
                <button onClick={() => { navigator.clipboard.writeText(marketingCopy); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all">
