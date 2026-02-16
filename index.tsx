@@ -64,7 +64,8 @@ import {
   BarChart3,
   Database,
   ArrowRightLeft,
-  Wand2
+  Wand2,
+  Grid
 } from 'lucide-react';
 
 // --- Utilities ---
@@ -468,6 +469,23 @@ const DreamCanvas = () => {
                />
             </div>
           )}
+
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em] flex items-center gap-2">
+              <Grid size={12} /> Lote de Imágenes
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[1, 2, 3].map(n => (
+                <button 
+                  key={n} 
+                  onClick={() => setBatchSize(n)}
+                  className={`py-2.5 rounded-xl border text-[10px] font-black transition-all ${batchSize === n ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-700'}`}
+                >
+                  {n} {n === 1 ? 'ACTIVO' : 'ACTIVOS'}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div>
             <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">Referencia Visual</label>
