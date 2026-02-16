@@ -65,7 +65,8 @@ import {
   Database,
   ArrowRightLeft,
   Wand2,
-  Grid
+  Grid,
+  Focus
 } from 'lucide-react';
 
 // --- Utilities ---
@@ -142,23 +143,24 @@ const SocialLaunchOverlay = ({ content, caption, onClose }: { content: string, c
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-300">
-      <div className="glass w-full max-w-md rounded-[2.5rem] border-white/10 p-8 space-y-8 animate-in zoom-in duration-500">
+      <div className="glass w-full max-w-md rounded-[2.5rem] border-white/10 p-8 space-y-8 animate-in zoom-in duration-500 shadow-[0_0_100px_rgba(99,102,241,0.2)]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-             <Rocket className="text-indigo-400 animate-bounce" size={24} />
+             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center"><Rocket className="text-white" size={20} /></div>
              <h3 className="text-lg font-black tracking-tight text-white uppercase italic">Lanzar al Mundo</h3>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white"><X size={20} /></button>
         </div>
 
-        <div className="aspect-video w-full rounded-2xl overflow-hidden bg-slate-900 border border-white/5">
+        <div className="aspect-square w-full rounded-2xl overflow-hidden bg-slate-900 border border-white/5 relative group">
           {content.startsWith('data:image') ? (
-            <img src={content} className="w-full h-full object-cover" />
+            <img src={content} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
           ) : content.startsWith('blob:') ? (
             <video src={content} className="w-full h-full object-cover" autoPlay loop muted />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-500 font-bold uppercase text-[10px]">Asset de Audio</div>
           )}
+          <div className="absolute top-4 left-4 px-3 py-1 bg-black/60 backdrop-blur-md rounded-lg text-[8px] font-black text-white uppercase tracking-widest border border-white/10">PREVIEW MODO AD</div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -181,8 +183,8 @@ const SocialLaunchOverlay = ({ content, caption, onClose }: { content: string, c
         </div>
 
         <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5">
-          <p className="text-[10px] text-slate-500 uppercase font-black mb-2 flex items-center gap-2"><Target size={12} /> Caption sugerida (IA)</p>
-          <p className="text-xs text-slate-300 leading-relaxed line-clamp-3">{caption || 'Creado con Nexus Creative Hub.'}</p>
+          <p className="text-[10px] text-slate-500 uppercase font-black mb-2 flex items-center gap-2"><Target size={12} /> Caption para Publicar</p>
+          <p className="text-xs text-slate-300 leading-relaxed line-clamp-4 font-medium italic">"{caption || 'Creado con Nexus Creative Hub.'}"</p>
         </div>
       </div>
     </div>
@@ -240,7 +242,7 @@ const DreamCanvas = () => {
   const [campaignGoal, setCampaignGoal] = useState('');
   const [marketingStyle, setMarketingStyle] = useState('Luxury Studio');
   const [aspectRatio, setAspectRatio] = useState('1:1');
-  const [batchSize, setBatchSize] = useState(1);
+  const [batchSize, setBatchSize] = useState(3);
   const [quality, setQuality] = useState<'Standard' | 'High'>('Standard');
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -264,25 +266,7 @@ const DreamCanvas = () => {
     { id: 'Investigación', label: 'Investigación', icon: BarChart3, example: 'Estudio sobre consumo de café en oficinas. El 70% prefiere café de especialidad.', insightExample: 'Insight: Los usuarios asocian el café de especialidad con un aumento del 40% en su claridad mental durante reuniones matutinas. Visualizar este beneficio psicológico.' }
   ];
 
-  const channels = [
-    { id: 'Social Media', label: 'Social Ads', icon: Instagram },
-    { id: 'LinkedIn B2B', label: 'LinkedIn', icon: Linkedin },
-    { id: 'Email Marketing', label: 'Email', icon: Mail },
-    { id: 'SEO/SEM', label: 'Búsqueda', icon: Search },
-    { id: 'Web/Landing', label: 'Web/Content', icon: Globe }
-  ];
-
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const toggleChannel = (id: string) => {
-    setSelectedChannels(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
-  };
-
-  const handleHighQualitySelect = async () => {
-    if (quality === 'High') { setQuality('Standard'); return; }
-    await window.aistudio.openSelectKey();
-    setQuality('High');
-  };
 
   const loadExample = () => {
     const brief = briefTypes.find(b => b.id === selectedBriefType);
@@ -305,12 +289,12 @@ const DreamCanvas = () => {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Actúa como un estratega creativo senior. Refina este brief de tipo "${selectedBriefType}" para que sea más profesional, preciso y efectivo para una IA generativa de imágenes. Estructura la respuesta con objetivos claros, tono de marca y descripción visual detallada.
+        contents: `Actúa como un estratega creativo senior de una agencia de Nueva York. Refina este brief de tipo "${selectedBriefType}" para que sea extremadamente profesional, con lenguaje de industria y visualmente descriptivo.
         
         Brief Original: ${prompt}
         ${selectedBriefType === 'Investigación' ? `Insight Clave: ${researchInsight}` : ''}
         
-        Retorna exclusivamente el texto del brief refinado en español, listo para ser procesado.`
+        Instrucciones: Mejora la narrativa de marca, define una estética de vanguardia y añade descriptores de iluminación y composición. Retorna exclusivamente el texto del brief refinado en español.`
       });
       setParallelBrief(response.text || "");
       setShowParallel(true);
@@ -332,40 +316,57 @@ const DreamCanvas = () => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const modelName = quality === 'High' ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
-      const styles: Record<string, string> = {
-        'Luxury Studio': 'High-end luxury commercial photography, cinematic lighting, sharp focus, 8k.',
-        'Minimalist': 'Clean minimalist, white space, soft shadows, neutral tones.',
-        'Vibrant Tech': 'Cyberpunk neon, sharp reflections, high contrast, digital futuristic.',
-        'Urban Lifestyle': 'Natural sunlight, authentic urban setting, shallow depth of field.'
-      };
       
-      let typeSpecificContext = `Brief Type: ${selectedBriefType}. Context: ${prompt}.`;
-      if (selectedBriefType === 'Investigación' && researchInsight) {
-        typeSpecificContext += ` KEY RESEARCH INSIGHT: ${researchInsight}. Transform this data into a conceptual visual metaphor.`;
-      }
+      const styles: Record<string, string> = {
+        'Luxury Studio': 'High-end luxury commercial photography, cinematic lighting, shot on 35mm lens, f/1.8, bokeh, deep shadows, premium textures, gold and onyx accents, 8k resolution.',
+        'Minimalist': 'Ultra-clean minimalism, high-key lighting, soft diffused shadows, neutral pastel palette, scandinavian design influence, spacious composition, sharp focus.',
+        'Vibrant Tech': 'Futuristic cyberpunk aesthetics, vibrant neon lighting, high contrast, iridescent surfaces, volumetric fog, digital motion blur, 80s synthwave color palette, 8k.',
+        'Urban Lifestyle': 'Authentic urban photography, natural golden hour sunlight, raw textures, handheld camera look, shallow depth of field, candid composition, vibrant street colors.'
+      };
 
-      const finalPrompt = `${typeSpecificContext} Marketing Style: ${styles[marketingStyle]}. Campaign Goal: ${campaignGoal || 'General promotion'}. Professional commercial grade photography.`;
-
+      const variationPerspectives = [
+        "Wide cinematic establishing shot, focused on the environment and scale.",
+        "Extreme close-up macro shot, focusing on high-quality textures, material details, and craftsmanship.",
+        "Dynamic low-angle perspective, emphasizing power and modern presence with creative lighting."
+      ];
+      
       let completedCount = 0;
       const generationPromises = Array.from({ length: batchSize }).map(async (_, i) => {
         try {
-          const parts: any[] = [{ text: `${finalPrompt} --variation ${i+1}` }];
+          const perspective = variationPerspectives[i % variationPerspectives.length];
+          let typeSpecificContext = `Brief: ${prompt}. `;
+          if (selectedBriefType === 'Investigación' && researchInsight) {
+            typeSpecificContext += `RESEARCH INSIGHT: ${researchInsight}. Visual metaphor. `;
+          }
+
+          const finalPrompt = `${typeSpecificContext} STYLE: ${styles[marketingStyle]}. COMPOSITION: ${perspective}. Professional advertising photography, award-winning lighting.`;
+
+          const parts: any[] = [{ text: finalPrompt }];
           if (refImage) parts.unshift({ inlineData: { data: refImage.data, mimeType: refImage.mimeType } });
           const config: any = { imageConfig: { aspectRatio } };
           if (quality === 'High') config.imageConfig.imageSize = "2K";
+          
           const response = await ai.models.generateContent({ model: modelName, contents: { parts }, config: config });
           const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
           completedCount++; setCurrentStep(completedCount);
           return part ? `data:image/png;base64,${part.inlineData.data}` : null;
-        } catch (err: any) { return null; }
+        } catch (err: any) { 
+          console.error(`Variation ${i} failed:`, err);
+          return null; 
+        }
       });
 
       const results = await Promise.all(generationPromises);
       const validImages = results.filter((img): img is string => img !== null);
-      if (validImages.length === 0) throw new Error("Generación fallida.");
+      if (validImages.length === 0) throw new Error("La generación de imágenes ha fallado. Revisa tu cuota o conexión.");
       setImages(validImages);
+      // Generamos el copy basado en el brief aplicado y la primera imagen del lote
       generateCopy(validImages[0], prompt);
-    } catch (err: any) { setError({ message: err.message, isQuota: false, isForbidden: false }); } finally { setLoading(false); }
+    } catch (err: any) { 
+      setError({ message: err.message, isQuota: false, isForbidden: false }); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const generateCopy = async (imageBuffer: string, originalPrompt: string) => {
@@ -379,15 +380,21 @@ const DreamCanvas = () => {
         contents: [
           { parts: [
               { inlineData: { data: base64Data, mimeType: 'image/png' } },
-              { text: `Based on a ${selectedBriefType} brief, create a high-converting post caption in Spanish for this asset. 
-              Brief description: ${originalPrompt}. 
-              ${selectedBriefType === 'Investigación' ? `Data Insight to include: ${researchInsight}` : ''}
-              Focus on ${channelsText}. Include hashtags and a strong CTA.` }
+              { text: `Actúa como un Copywriter Senior. Crea un post de alta conversión en español basado en este activo visual. 
+              Brief del proyecto: ${originalPrompt}. 
+              Tipo de Brief: ${selectedBriefType}.
+              Canales objetivo: ${channelsText}.
+              
+              El copy debe ser persuasivo, moderno y directo. Incluye 3 hashtags estratégicos y una llamada a la acción irresistible.` }
             ] }
         ]
       });
       setMarketingCopy(response.text || "");
-    } catch (e: any) { setMarketingCopy(""); } finally { setCopyLoading(false); }
+    } catch (e: any) { 
+      setMarketingCopy("Error al generar el copy estratégico."); 
+    } finally { 
+      setCopyLoading(false); 
+    }
   };
 
   return (
@@ -395,11 +402,14 @@ const DreamCanvas = () => {
       {socialLaunch && <SocialLaunchOverlay content={socialLaunch.content} caption={socialLaunch.caption} onClose={() => setSocialLaunch(null)} />}
       
       <div className="glass p-6 rounded-3xl h-fit border-white/5 shadow-2xl space-y-6">
-        <div className="flex items-center gap-3 mb-4"><ShoppingBag className="text-emerald-400" size={20} /><h2 className="font-bold text-white uppercase tracking-widest text-sm">Brief Studio</h2></div>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-8 h-8 bg-emerald-500/10 rounded-lg flex items-center justify-center"><ShoppingBag className="text-emerald-400" size={18} /></div>
+          <h2 className="font-bold text-white uppercase tracking-widest text-sm">Brief Studio</h2>
+        </div>
         
         <div className="space-y-4">
           <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-3 block tracking-[0.1em]">Arquitectura Estratégica</label>
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-3 block tracking-[0.1em]">Arquitectura de Campaña</label>
             <div className="grid grid-cols-3 gap-2">
               {briefTypes.map(b => (
                 <button
@@ -416,13 +426,11 @@ const DreamCanvas = () => {
 
           <div className="relative group">
             <div className="flex justify-between items-center mb-2">
-               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.1em]">Descripción del Brief</label>
-               <div className="flex gap-3">
-                  <button onClick={loadExample} className="text-[9px] font-black text-indigo-400 hover:text-indigo-300 flex items-center gap-1 uppercase tracking-tighter transition-colors">✨ Cargar Ejemplo</button>
-               </div>
+               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.1em]">Instrucciones Creativas</label>
+               <button onClick={loadExample} className="text-[9px] font-black text-indigo-400 hover:text-indigo-300 flex items-center gap-1 uppercase tracking-tighter transition-colors">✨ Cargar Plantilla</button>
             </div>
             <textarea 
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white min-h-[100px] outline-none focus:ring-1 focus:ring-indigo-500 transition-all" 
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white min-h-[120px] outline-none focus:ring-1 focus:ring-indigo-500 transition-all shadow-inner" 
               placeholder={`Define el contexto ${selectedBriefType.toLowerCase()}...`}
               value={prompt} 
               onChange={e => setPrompt(e.target.value)} 
@@ -430,28 +438,28 @@ const DreamCanvas = () => {
             <button 
               onClick={refineBriefWithAI}
               disabled={refining || !prompt}
-              className="absolute bottom-3 right-3 p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shadow-xl shadow-indigo-900/40 transition-all active:scale-90 disabled:opacity-50 disabled:grayscale"
-              title="Optimizar Brief con IA"
+              className="absolute bottom-3 right-3 p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shadow-xl shadow-indigo-900/40 transition-all active:scale-90 disabled:opacity-50"
+              title="Refinar con Nexus AI"
             >
               {refining ? <Loader2 className="animate-spin" size={16} /> : <Wand2 size={16} />}
             </button>
           </div>
 
           {showParallel && (
-            <div className="animate-in zoom-in slide-in-from-top-4 duration-500 border border-indigo-500/30 bg-indigo-500/5 rounded-2xl p-4 space-y-3 shadow-2xl shadow-indigo-500/10">
+            <div className="animate-in zoom-in slide-in-from-top-4 duration-500 border border-indigo-500/30 bg-indigo-500/5 rounded-2xl p-4 space-y-3 shadow-2xl">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Sparkles size={14} className="text-indigo-400" />
-                  <span className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">Nexus Parallel Brief</span>
+                  <span className="text-[10px] font-black text-indigo-200 uppercase tracking-widest italic">Versión Optimizada</span>
                 </div>
                 <button onClick={() => setShowParallel(false)} className="text-slate-500 hover:text-white"><X size={14} /></button>
               </div>
-              <p className="text-[11px] text-slate-300 italic leading-relaxed line-clamp-4">{parallelBrief}</p>
+              <p className="text-[11px] text-slate-300 italic leading-relaxed line-clamp-4 bg-slate-900/40 p-2 rounded-lg">{parallelBrief}</p>
               <button 
                 onClick={applyParallelBrief}
-                className="w-full py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest border border-indigo-500/30 transition-all"
+                className="w-full py-2.5 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest border border-indigo-500/30 transition-all flex items-center justify-center gap-2"
               >
-                Aplicar Mejor Versión
+                <Check size={12} /> APLICAR ESTA VERSIÓN
               </button>
             </div>
           )}
@@ -459,11 +467,11 @@ const DreamCanvas = () => {
           {selectedBriefType === 'Investigación' && (
             <div className="animate-in slide-in-from-top-2 duration-300">
                <label className="text-[10px] font-bold text-amber-500/80 uppercase mb-2 block tracking-[0.1em] flex items-center gap-2">
-                 <Database size={12} /> Insight de Investigación (Key Data)
+                 <Database size={12} /> Insight Extraído
                </label>
                <textarea 
-                 className="w-full bg-slate-900 border border-amber-500/10 rounded-xl p-3 text-xs text-amber-100 min-h-[60px] outline-none focus:ring-1 focus:ring-amber-500/30 transition-all placeholder:text-slate-700" 
-                 placeholder="¿Qué dato clave quieres visualizar?"
+                 className="w-full bg-slate-900 border border-amber-500/10 rounded-xl p-3 text-xs text-amber-100 min-h-[60px] outline-none focus:ring-1 focus:ring-amber-500/30 transition-all placeholder:text-slate-700 shadow-inner" 
+                 placeholder="Ej: Aumento del 40% en eficiencia..."
                  value={researchInsight} 
                  onChange={e => setResearchInsight(e.target.value)} 
                />
@@ -472,7 +480,7 @@ const DreamCanvas = () => {
 
           <div>
             <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em] flex items-center gap-2">
-              <Grid size={12} /> Lote de Imágenes
+              <Grid size={12} /> Lote de Lanzamiento
             </label>
             <div className="grid grid-cols-3 gap-2">
               {[1, 2, 3].map(n => (
@@ -488,68 +496,86 @@ const DreamCanvas = () => {
           </div>
 
           <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">Referencia Visual</label>
-            <div onClick={() => fileInputRef.current?.click()} className={`w-full border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer ${refImage ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700 transition-colors'}`}>
-              {refImage ? <img src={`data:${refImage.mimeType};base64,${refImage.data}`} className="w-full aspect-video object-cover rounded-lg" /> : <><Upload size={18} className="text-slate-600 mb-2" /><span className="text-[9px] font-bold text-slate-500 uppercase">Guía de Composición</span></>}
-              <input type="file" ref={fileInputRef} onChange={e => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = () => setRefImage({ data: (r.result as string).split(',')[1], mimeType: f.type }); r.readAsDataURL(f); } }} className="hidden" accept="image/*" />
+            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-[0.1em]">Atmósfera Visual</label>
+            <div className="grid grid-cols-2 gap-2">
+              {['Luxury Studio', 'Minimalist', 'Vibrant Tech', 'Urban Lifestyle'].map(s => (
+                <button 
+                  key={s} 
+                  onClick={() => setMarketingStyle(s)} 
+                  className={`py-2.5 rounded-lg text-[9px] font-black border transition-all uppercase ${marketingStyle === s ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                >
+                  {s}
+                </button>
+              ))}
             </div>
           </div>
 
           <div className="pt-4">
-            <button onClick={generateImage} disabled={loading || !prompt} className="w-full py-4 bg-white text-slate-950 rounded-2xl font-black text-xs active:scale-95 transition-all shadow-[0_10px_30px_rgba(255,255,255,0.1)] flex items-center justify-center gap-2">
-              {loading ? <Loader2 className="animate-spin" size={18} /> : <><Rocket size={16} /> DESPLEGAR CAMPAÑA</>}
+            <button onClick={generateImage} disabled={loading || !prompt} className="w-full py-4 bg-white text-slate-950 rounded-2xl font-black text-xs active:scale-95 transition-all shadow-[0_10px_30px_rgba(255,255,255,0.1)] flex items-center justify-center gap-2 uppercase tracking-[0.2em]">
+              {loading ? <Loader2 className="animate-spin" size={18} /> : <><Rocket size={16} /> Lanzar Campaña</>}
             </button>
           </div>
         </div>
       </div>
 
       <div className="flex flex-col gap-6">
-        <div className="min-h-[450px] glass rounded-[2.5rem] border-white/5 p-8 relative overflow-hidden">
+        <div className="min-h-[450px] glass rounded-[2.5rem] border-white/5 p-8 relative overflow-hidden shadow-inner">
           {images.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in duration-500">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in zoom-in duration-500">
               {images.map((img, i) => (
-                <div key={i} className="group relative aspect-square rounded-[2rem] overflow-hidden border border-white/5 bg-slate-900">
+                <div key={i} className="group relative aspect-square rounded-[2rem] overflow-hidden border border-white/5 bg-slate-900 shadow-2xl">
                   <img src={img} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex items-end justify-between p-6 opacity-0 group-hover:opacity-100 transition-all duration-300">
-                    <button onClick={() => setSocialLaunch({content: img, caption: marketingCopy || ''})} className="px-5 py-2.5 bg-white text-slate-950 rounded-xl font-black text-[10px] flex items-center gap-2 shadow-xl transform translate-y-2 group-hover:translate-y-0 transition-all duration-300"><Rocket size={14} /> LANZAR</button>
-                    <button onClick={() => { const l = document.createElement('a'); l.href = img; l.download = `nexus-${i}.png`; l.click(); }} className="p-3 bg-slate-800/80 hover:bg-slate-700 text-white rounded-xl transition-colors"><Download size={18} /></button>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/20 to-transparent flex flex-col justify-end p-6 opacity-0 group-hover:opacity-100 transition-all duration-300">
+                    <div className="flex items-center justify-between gap-3 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+                      <button onClick={() => setSocialLaunch({content: img, caption: marketingCopy || ''})} className="flex-1 py-3 bg-white text-slate-950 rounded-xl font-black text-[10px] flex items-center justify-center gap-2 shadow-xl hover:bg-indigo-50 transition-colors uppercase tracking-widest">
+                        <Rocket size={14} /> Publicar
+                      </button>
+                      <button onClick={() => { const l = document.createElement('a'); l.href = img; l.download = `nexus-ad-${i}.png`; l.click(); }} className="p-3 bg-slate-800/80 hover:bg-slate-700 text-white rounded-xl transition-colors border border-white/10">
+                        <Download size={18} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           ) : !loading && (
             <div className="h-full flex flex-col items-center justify-center text-slate-800/20 py-24">
-              <div className="p-10 border-2 border-dashed border-slate-800 rounded-[3rem] mb-6">
-                <ShoppingBag size={80} />
+              <div className="p-12 border-2 border-dashed border-slate-800 rounded-[3rem] mb-6">
+                <Focus size={80} />
               </div>
-              <p className="text-[10px] font-black uppercase tracking-[0.5em]">Esperando Directriz Creativa</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.6em]">Esperando Datos Creativos</p>
             </div>
           )}
           {loading && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/40 backdrop-blur-sm animate-in fade-in">
-              <div className="w-20 h-20 border-4 border-indigo-500/10 border-t-indigo-500 rounded-full animate-spin mb-6"></div>
-              <p className="text-white font-black text-xs uppercase tracking-[0.3em] animate-pulse">Sintetizando activos...</p>
-              <p className="text-slate-500 text-[9px] mt-2 font-bold uppercase tracking-widest">{currentStep} de {batchSize} completados</p>
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/60 backdrop-blur-md animate-in fade-in">
+              <div className="relative">
+                <div className="w-24 h-24 border-4 border-indigo-500/10 border-t-indigo-500 rounded-full animate-spin mb-6"></div>
+                <div className="absolute inset-0 flex items-center justify-center"><Layers className="text-indigo-400 animate-pulse" size={32} /></div>
+              </div>
+              <p className="text-white font-black text-xs uppercase tracking-[0.4em] animate-pulse">Sintetizando Activos Únicos...</p>
+              <p className="text-slate-500 text-[9px] mt-4 font-bold uppercase tracking-[0.2em]">{currentStep} de {batchSize} variantes procesadas</p>
             </div>
           )}
         </div>
         
         {marketingCopy && (
-          <div className="glass p-10 rounded-[2.5rem] border-white/5 shadow-2xl animate-in slide-in-from-bottom duration-700">
-            <div className="flex items-center justify-between mb-8">
-               <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center shadow-lg"><Target className="text-indigo-400" size={18} /></div>
+          <div className="glass p-10 rounded-[2.5rem] border-white/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-700">
+            <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-6">
+               <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center shadow-lg"><MessageSquare className="text-indigo-400" size={24} /></div>
                   <div>
-                    <h3 className="font-black text-white uppercase text-xs tracking-widest">Plan de Social Media</h3>
-                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Estrategia para {selectedBriefType}</p>
+                    <h3 className="font-black text-white uppercase text-xs tracking-[0.2em]">Copia Estratégica (Copy)</h3>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Optimizado para {selectedBriefType}</p>
                   </div>
                </div>
-               <button onClick={() => { navigator.clipboard.writeText(marketingCopy); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all">
+               <button onClick={() => { navigator.clipboard.writeText(marketingCopy); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all border border-white/5">
                  {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                 {copied ? 'Copiado' : 'Copiar'}
+                 {copied ? 'Copiado' : 'Copiar Texto'}
                </button>
             </div>
-            <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-950/50 p-8 rounded-[1.5rem] border border-white/5 font-medium shadow-inner">{marketingCopy}</div>
+            <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-950/50 p-8 rounded-[1.5rem] border border-white/5 font-medium shadow-inner italic">
+              "{marketingCopy}"
+            </div>
           </div>
         )}
       </div>
@@ -659,7 +685,7 @@ const LiveCompanion = () => {
           onclose: () => setActive(false)
         },
         config: {
-          responseModalities: [Modality.AUDIO],
+          responseModalalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
           inputAudioTranscription: {}, outputAudioTranscription: {}
         }
